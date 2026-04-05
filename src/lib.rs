@@ -4,8 +4,7 @@ mod error;
 mod stream;
 mod types;
 
-pub use client::*;
-pub use config::*;
-pub use error::*;
-pub use stream::*;
-pub use types::*;
+pub use client::{ClaudeClient, CommandRunner, DefaultRunner};
+pub use config::{ClaudeConfig, ClaudeConfigBuilder};
+pub use error::ClaudeError;
+pub use types::{ClaudeResponse, Usage};

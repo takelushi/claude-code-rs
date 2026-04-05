@@ -1,0 +1,22 @@
+{
+  "type": "result",
+  "subtype": "error",
+  "is_error": true,
+  "duration_ms": 1200,
+  "duration_api_ms": 1100,
+  "num_turns": 0,
+  "result": "Error: invalid request",
+  "stop_reason": "error",
+  "session_id": "c999fe2e-d286-41d9-b0dc-b1000eab330f",
+  "total_cost_usd": 0.0,
+  "usage": {
+    "input_tokens": 0,
+    "cache_creation_input_tokens": 0,
+    "cache_read_input_tokens": 0,
+    "output_tokens": 0,
+    "server_tool_use": {
+      "web_search_requests": 0,
+      "web_fetch_requests": 0
+    }
+  }
+}

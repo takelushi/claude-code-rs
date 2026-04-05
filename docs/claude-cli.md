@@ -24,3 +24,11 @@
 ## stream-json は --verbose が必須
 
 `--output-format stream-json` は `--verbose` を併用しないとエラーになる。
+
+## --max-turns の挙動
+
+`--max-turns 1` を指定すると、ツール使用なしの1回応答で停止する。E2E テストで課金を抑えるのに有用。
+
+## --no-session-persistence
+
+セッションをディスクに保存しない。`--resume` によるセッション再開が不要な場合（ライブラリからの単発呼び出し等）に使う。

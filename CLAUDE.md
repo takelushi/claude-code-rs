@@ -15,19 +15,21 @@ Claude Code CLI をRustから実行するためのライブラリ。
 - シリアライズ: serde / serde_json
 - プロセス実行: tokio::process
 - エラー処理: thiserror
-- テスト: cargo test + mockall (必要に応じて)
+- テスト: cargo test + mockall 0.14
 
 ## Development
 
 ### Commands
 
 ```sh
-cargo build          # ビルド
-cargo test           # テスト実行
-cargo clippy         # lint
-cargo fmt --check    # フォーマットチェック
-cargo fmt            # フォーマット適用
-cargo doc --open     # ドキュメント生成
+cargo build                    # ビルド
+cargo test                     # テスト実行
+cargo test -- --ignored        # E2E テスト実行
+cargo clippy                   # lint
+cargo fmt --check              # フォーマットチェック
+cargo fmt                      # フォーマット適用
+cargo doc --open               # ドキュメント生成
+cargo run --example simple     # 動作確認
 ```
 
 ### Workflow
@@ -47,6 +49,8 @@ src/
   types.rs      # JSON/stream-json 両方の型定義のみ
   error.rs      # エラー型
   stream.rs     # stream-json のパース・イテレーション・バッファリング
+examples/
+  simple.rs     # 最小限の動作確認用サンプル
 ```
 
 ### Error Variants
@@ -81,3 +85,6 @@ src/
 - 非同期 API を基本とし、同期ラッパーは提供しない
 - `#[must_use]`, `#[non_exhaustive]` を適切に使う
 - テストでは実際の `claude` CLI を呼ばない (モック or fixture)
+- `mockall` の `returning` は async クロージャ非対応。非同期の遅延が必要なテスト（timeout 等）は手動で trait 実装した struct を使う
+- `CommandRunner` trait に `#[allow(async_fn_in_trait)]` を付与する（ライブラリ内部用のため `Send` 境界の警告を抑制）
+- コードコメント・doc comment は英語で書く
