@@ -14,6 +14,7 @@ Claude Code CLI をRustから実行するためのライブラリ。
 - 非同期ランタイム: tokio
 - シリアライズ: serde / serde_json
 - プロセス実行: tokio::process
+- ストリーミング: tokio-stream / async-stream
 - エラー処理: thiserror
 - テスト: cargo test + mockall 0.14
 
@@ -30,6 +31,7 @@ cargo fmt --check              # フォーマットチェック
 cargo fmt                      # フォーマット適用
 cargo doc --open               # ドキュメント生成
 cargo run --example simple     # 動作確認
+cargo run --example stream     # ストリーミング動作確認
 ```
 
 ### Workflow
@@ -51,6 +53,7 @@ src/
   stream.rs     # stream-json のパース・イテレーション・バッファリング
 examples/
   simple.rs     # 最小限の動作確認用サンプル
+  stream.rs     # ストリーミング動作確認用サンプル
 ```
 
 ### Error Variants

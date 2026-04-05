@@ -32,3 +32,26 @@
 ## --no-session-persistence
 
 セッションをディスクに保存しない。`--resume` によるセッション再開が不要な場合（ライブラリからの単発呼び出し等）に使う。
+
+## stream-json のイベント型
+
+`--output-format stream-json --verbose` で出力される NDJSON の各イベント:
+
+| type | subtype / content type | 内容 |
+| --- | --- | --- |
+| `system` | `init` | セッション初期化情報（session_id, model 等） |
+| `system` | `hook_started` / `hook_response` | hook の実行（ライブラリではスキップ） |
+| `assistant` | content[].type = `thinking` | モデルの思考過程 |
+| `assistant` | content[].type = `text` | テキスト応答チャンク |
+| `assistant` | content[].type = `tool_use` | ツール呼び出し |
+| `user` | content[].type = `tool_result` | ツール実行結果 |
+| `rate_limit_event` | — | レートリミット情報 |
+| `result` | `success` | 最終結果（`--output-format json` と同じ構造） |
+
+### content 配列の複数要素
+
+1つの `assistant` / `user` イベントの `.message.content[]` に複数ブロックが含まれる場合がある。ライブラリでは各要素を個別の `StreamEvent` として yield する。
+
+### --include-partial-messages
+
+このオプションを付けると、テキストがより細かいチャンク（単語単位レベル）で送信される。デフォルトでは文単位程度のまとまりで送信される。
