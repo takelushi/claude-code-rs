@@ -11,6 +11,8 @@ pub struct ClaudeConfig {
     pub max_turns: Option<u32>,
     /// Timeout duration. No timeout when `None`.
     pub timeout: Option<Duration>,
+    /// Include partial message chunks in stream output (`--include-partial-messages`).
+    pub include_partial_messages: Option<bool>,
 }
 
 impl ClaudeConfig {
@@ -20,15 +22,10 @@ impl ClaudeConfig {
         ClaudeConfigBuilder::default()
     }
 
-    /// Builds command-line arguments from this configuration.
-    ///
-    /// Includes fixed options such as `--print --output-format json`.
-    #[must_use]
-    pub fn to_args(&self, prompt: &str) -> Vec<String> {
+    /// Builds common CLI arguments shared by JSON and stream-json modes.
+    fn base_args(&self) -> Vec<String> {
         let mut args = vec![
             "--print".into(),
-            "--output-format".into(),
-            "json".into(),
             "--no-session-persistence".into(),
             "--setting-sources".into(),
             String::new(),
@@ -56,6 +53,36 @@ impl ClaudeConfig {
             args.push(max_turns.to_string());
         }
 
+        args
+    }
+
+    /// Builds command-line arguments for JSON output mode.
+    ///
+    /// Includes fixed options such as `--print --output-format json`.
+    #[must_use]
+    pub fn to_args(&self, prompt: &str) -> Vec<String> {
+        let mut args = self.base_args();
+        args.push("--output-format".into());
+        args.push("json".into());
+        args.push(prompt.into());
+        args
+    }
+
+    /// Builds command-line arguments for stream-json output mode.
+    ///
+    /// Includes `--verbose` (required for stream-json) and optionally
+    /// `--include-partial-messages`.
+    #[must_use]
+    pub fn to_stream_args(&self, prompt: &str) -> Vec<String> {
+        let mut args = self.base_args();
+        args.push("--output-format".into());
+        args.push("stream-json".into());
+        args.push("--verbose".into());
+
+        if self.include_partial_messages == Some(true) {
+            args.push("--include-partial-messages".into());
+        }
+
         args.push(prompt.into());
         args
     }
@@ -68,6 +95,7 @@ pub struct ClaudeConfigBuilder {
     system_prompt: Option<String>,
     max_turns: Option<u32>,
     timeout: Option<Duration>,
+    include_partial_messages: Option<bool>,
 }
 
 impl ClaudeConfigBuilder {
@@ -99,6 +127,13 @@ impl ClaudeConfigBuilder {
         self
     }
 
+    /// Enables or disables partial message chunks in stream output.
+    #[must_use]
+    pub fn include_partial_messages(mut self, enabled: bool) -> Self {
+        self.include_partial_messages = Some(enabled);
+        self
+    }
+
     /// Builds the [`ClaudeConfig`].
     #[must_use]
     pub fn build(self) -> ClaudeConfig {
@@ -107,6 +142,7 @@ impl ClaudeConfigBuilder {
             system_prompt: self.system_prompt,
             max_turns: self.max_turns,
             timeout: self.timeout,
+            include_partial_messages: self.include_partial_messages,
         }
     }
 }
@@ -178,5 +214,36 @@ mod tests {
         assert_eq!(args[mt_idx + 1], "5");
 
         assert_eq!(args.last().unwrap(), "test prompt");
+    }
+
+    #[test]
+    fn to_stream_args_minimal() {
+        let config = ClaudeConfig::default();
+        let args = config.to_stream_args("hello");
+
+        assert!(args.contains(&"--print".to_string()));
+        assert!(args.contains(&"stream-json".to_string()));
+        assert!(args.contains(&"--verbose".to_string()));
+        assert!(!args.contains(&"json".to_string()));
+        assert!(!args.contains(&"--include-partial-messages".to_string()));
+        assert_eq!(args.last().unwrap(), "hello");
+    }
+
+    #[test]
+    fn to_stream_args_with_partial_messages() {
+        let config = ClaudeConfig::builder()
+            .include_partial_messages(true)
+            .build();
+        let args = config.to_stream_args("hello");
+
+        assert!(args.contains(&"--include-partial-messages".to_string()));
+    }
+
+    #[test]
+    fn builder_sets_include_partial_messages() {
+        let config = ClaudeConfig::builder()
+            .include_partial_messages(true)
+            .build();
+        assert_eq!(config.include_partial_messages, Some(true));
     }
 }
