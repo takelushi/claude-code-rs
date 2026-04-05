@@ -85,45 +85,35 @@ Builder に `include_partial_messages(bool)` メソッドを追加。
 
 ## CommandRunner 変更
 
-ストリーミング用に `spawn()` メソッドを追加（完了済み `Output` ではなくライブな `Child` プロセスを返す）:
+`CommandRunner` trait には変更を加えない。`ask_stream()` 内で直接 `tokio::process::Command::spawn()` を呼ぶ。
 
-```rust
-pub trait CommandRunner: Send + Sync {
-    async fn run(&self, args: &[String]) -> std::io::Result<Output>;
-    async fn spawn(&self, args: &[String]) -> std::io::Result<Child>;  // 追加
-}
-```
-
-`DefaultRunner::spawn()` の実装:
-
-```rust
-async fn spawn(&self, args: &[String]) -> std::io::Result<Child> {
-    Command::new("claude")
-        .args(args)
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-}
-```
-
-注: `spawn()` は本質的に同期的（プロセス起動のみ）だが、trait の一貫性とモック容易性のため async にする。
+`Child` のモックは困難なため、テスト戦略を分離する:
+- **stream.rs のパースロジック**: `impl AsyncBufRead` を受け取る関数として実装し、テストでは `Cursor<Vec<u8>>` を渡す
+- **ask_stream() の結合**: E2E テストでカバー
 
 ## 引数生成
 
-`ClaudeConfig` に `to_stream_args()` メソッドを追加:
+`ClaudeConfig` に `to_stream_args()` メソッドを追加。`to_args()` と共通部分が多いため、内部ヘルパーで重複を排除する:
 
 ```rust
 impl ClaudeConfig {
-    pub fn to_stream_args(&self, prompt: &str) -> Vec<String>;
+    /// 共通の固定フラグ + model + max_turns + system_prompt を組み立てる。
+    fn base_args(&self) -> Vec<String> { ... }
+
+    /// JSON 用引数（既存）。base_args + --output-format json + prompt。
+    pub fn to_args(&self, prompt: &str) -> Vec<String> { ... }
+
+    /// stream-json 用引数。base_args + --output-format stream-json + --verbose + prompt。
+    pub fn to_stream_args(&self, prompt: &str) -> Vec<String> { ... }
 }
 ```
 
-`to_args()` との差分:
+`to_stream_args()` が `to_args()` と異なる点:
 - `--output-format stream-json`（`json` ではなく）
 - `--verbose`（stream-json に必須）
 - `--include-partial-messages`（`include_partial_messages == Some(true)` の場合）
 
-共通の固定フラグはそのまま: `--print`, `--no-session-persistence`, `--setting-sources ''`, `--strict-mcp-config`, `--mcp-config`, `--tools ''`, `--disable-slash-commands`, `--system-prompt`。
+共通の固定フラグは `base_args()` に集約: `--print`, `--no-session-persistence`, `--setting-sources ''`, `--strict-mcp-config`, `--mcp-config`, `--tools ''`, `--disable-slash-commands`, `--system-prompt`, `--model`（任意）, `--max-turns`（任意）。
 
 ## stream.rs の責務
 
@@ -155,6 +145,10 @@ match json["type"].as_str() {
 
 `assistant` イベントの場合: `.message.content[]` 配列の最後の要素でイベント種別を判定する。
 
+### content 配列に複数要素がある場合
+
+1つの `assistant` イベントの `.message.content[]` に複数の content ブロックが含まれる場合がある（例: thinking + text が1イベントに混在）。この場合、配列の各要素を個別に処理し、それぞれ対応する `StreamEvent` を yield する。つまり1つの NDJSON 行から複数の `StreamEvent` が生成される可能性がある。
+
 ## 依存追加
 
 `Cargo.toml` に追加:
@@ -165,28 +159,35 @@ tokio-stream = "0.1"
 async-stream = "0.3"
 ```
 
+## タイムアウト
+
+ストリームに対するタイムアウトはライブラリ側では提供しない。`config.timeout` は `ask()` にのみ適用される。
+
+ストリームのタイムアウト戦略はユースケースによって異なる（全体タイムアウト vs イベント間タイムアウト等）ため、利用者が `tokio_stream::StreamExt::timeout()` 等で自前対応する。
+
 ## テスト戦略
 
 ### ユニットテスト (stream.rs)
 
+- パース関数は `impl AsyncBufRead` を受け取る設計にし、テストでは `Cursor<Vec<u8>>` を渡す
 - fixture: CLI 出力を模した NDJSON テキストファイル
 - 各イベント型のパースが正しいことを検証
 - ANSI エスケープ混入行がスキップまたはストリップされることを検証
 - 空行・不正行がスキップされることを検証
+- content 配列に複数要素があるケースのテスト
 - 完全なストリームシーケンスをテスト: init → thinking → text → result
 
 ### ユニットテスト (client.rs)
 
-- `CommandRunner::spawn()` をモックし、事前定義した stdout を持つ偽の `Child` を返す
-- `ask_stream()` が正しいシーケンスの `StreamEvent` を返すことを検証
-- プロセス起動エラーが正しい `ClaudeError` にマップされることを検証
-- 部分ストリーム後の非ゼロ終了がエラーを yield することを検証
+- `ask_stream()` は `Child` プロセスに依存するため、ユニットテストでの直接テストは行わない
+- E2E テストでカバーする
 
 ### ユニットテスト (config.rs)
 
 - `to_stream_args()` に `--verbose` と `stream-json` が含まれることを検証
 - `--include-partial-messages` フラグの有無を検証
 - `include_partial_messages` 付きの Builder をテスト
+- `base_args()` リファクタ後も既存の `to_args()` テストがパスすることを確認
 
 ### E2E テスト
 
@@ -205,7 +206,7 @@ async-stream = "0.3"
 | `src/stream.rs` | NDJSON パース → `StreamEvent` 変換を実装 |
 | `src/types.rs` | `StreamEvent` enum を追加 |
 | `src/config.rs` | `include_partial_messages`, `to_stream_args()` を追加 |
-| `src/client.rs` | `CommandRunner` に `spawn()` 追加、`ClaudeClient` に `ask_stream()` 追加 |
+| `src/client.rs` | `ClaudeClient` に `ask_stream()` 追加 |
 | `src/lib.rs` | `StreamEvent` をエクスポート |
 | `tests/fixtures/stream_success.ndjson` | ストリーム用 fixture |
 | `tests/e2e.rs` | ストリーム E2E テストを追加 |
