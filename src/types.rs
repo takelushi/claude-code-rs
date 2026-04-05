@@ -36,6 +36,46 @@ pub struct Usage {
     pub cache_creation_input_tokens: u64,
 }
 
+/// Event emitted from a stream-json response.
+#[derive(Debug, Clone)]
+#[non_exhaustive]
+pub enum StreamEvent {
+    /// Session initialization info.
+    SystemInit {
+        /// Session ID.
+        session_id: String,
+        /// Model name.
+        model: String,
+    },
+    /// Model's thinking process (extended thinking).
+    Thinking(String),
+    /// Text response chunk.
+    Text(String),
+    /// Tool invocation by the model.
+    ToolUse {
+        /// Tool use ID.
+        id: String,
+        /// Tool name.
+        name: String,
+        /// Tool input as JSON value.
+        input: serde_json::Value,
+    },
+    /// Tool execution result.
+    ToolResult {
+        /// ID of the tool use this result belongs to.
+        tool_use_id: String,
+        /// Result content.
+        content: String,
+    },
+    /// Rate limit information.
+    RateLimit {
+        /// Timestamp when the rate limit resets.
+        resets_at: u64,
+    },
+    /// Final result (same structure as non-streaming response).
+    Result(ClaudeResponse),
+}
+
 /// Strips ANSI escape sequences from stdout and extracts the JSON portion.
 pub(crate) fn strip_ansi(input: &str) -> &str {
     // CLI output may be wrapped with escape sequences like `\x1b[?1004l{...}\x1b[?1004l`.

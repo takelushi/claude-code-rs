@@ -7,4 +7,4 @@ mod types;
 pub use client::{ClaudeClient, CommandRunner, DefaultRunner};
 pub use config::{ClaudeConfig, ClaudeConfigBuilder};
 pub use error::ClaudeError;
-pub use types::{ClaudeResponse, Usage};
+pub use types::{ClaudeResponse, StreamEvent, Usage};
