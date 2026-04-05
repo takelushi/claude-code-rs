@@ -1,12 +1,17 @@
 #[cfg(test)]
 use mockall::automock;
 
+use std::pin::Pin;
 use std::process::Output;
-use tokio::process::Command;
+
+use tokio::io::BufReader;
+use tokio::process::Command as TokioCommand;
+use tokio_stream::Stream;
 
 use crate::config::ClaudeConfig;
 use crate::error::ClaudeError;
-use crate::types::{ClaudeResponse, strip_ansi};
+use crate::stream::parse_stream;
+use crate::types::{ClaudeResponse, StreamEvent, strip_ansi};
 
 /// Trait abstracting CLI execution. Mockable in tests.
 #[allow(async_fn_in_trait)]
@@ -22,7 +27,7 @@ pub struct DefaultRunner;
 
 impl CommandRunner for DefaultRunner {
     async fn run(&self, args: &[String]) -> std::io::Result<Output> {
-        Command::new("claude").args(args).output().await
+        TokioCommand::new("claude").args(args).output().await
     }
 }
 
@@ -41,6 +46,62 @@ impl ClaudeClient {
             config,
             runner: DefaultRunner,
         }
+    }
+
+    /// Sends a prompt and returns a stream of events.
+    ///
+    /// Spawns the CLI with `--output-format stream-json` and streams events
+    /// in real-time. The stream ends with a [`StreamEvent::Result`] on success.
+    ///
+    /// Timeout is not applied to streams. Use `tokio_stream::StreamExt::timeout()`
+    /// if needed.
+    pub async fn ask_stream(
+        &self,
+        prompt: &str,
+    ) -> Result<Pin<Box<dyn Stream<Item = Result<StreamEvent, ClaudeError>> + Send>>, ClaudeError>
+    {
+        let args = self.config.to_stream_args(prompt);
+
+        let mut child = TokioCommand::new("claude")
+            .args(&args)
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped())
+            .spawn()
+            .map_err(|e| {
+                if e.kind() == std::io::ErrorKind::NotFound {
+                    ClaudeError::CliNotFound
+                } else {
+                    ClaudeError::Io(e)
+                }
+            })?;
+
+        let stdout = child.stdout.take().expect("stdout must be piped");
+        let reader = BufReader::new(stdout);
+        let event_stream = parse_stream(reader);
+
+        Ok(Box::pin(async_stream::stream! {
+            tokio::pin!(event_stream);
+            while let Some(event) = tokio_stream::StreamExt::next(&mut event_stream).await {
+                yield Ok(event);
+            }
+
+            let status = child.wait().await;
+            match status {
+                Ok(s) if !s.success() => {
+                    let code = s.code().unwrap_or(-1);
+                    let mut stderr_buf = Vec::new();
+                    if let Some(mut stderr) = child.stderr.take() {
+                        let _ = tokio::io::AsyncReadExt::read_to_end(&mut stderr, &mut stderr_buf).await;
+                    }
+                    let stderr_str = String::from_utf8_lossy(&stderr_buf).into_owned();
+                    yield Err(ClaudeError::NonZeroExit { code, stderr: stderr_str });
+                }
+                Err(e) => {
+                    yield Err(ClaudeError::Io(e));
+                }
+                Ok(_) => {}
+            }
+        }))
     }
 }
 

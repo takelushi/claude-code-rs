@@ -1,8 +1,5 @@
-#![allow(dead_code)]
 use std::pin::Pin;
 
-#[allow(unused_imports)]
-use crate::error::ClaudeError;
 use crate::types::{ClaudeResponse, StreamEvent, strip_ansi};
 use async_stream::stream;
 use serde_json::Value;
