@@ -1,8 +1,13 @@
 #![allow(dead_code)]
+use std::pin::Pin;
+
 #[allow(unused_imports)]
 use crate::error::ClaudeError;
 use crate::types::{ClaudeResponse, StreamEvent, strip_ansi};
+use async_stream::stream;
 use serde_json::Value;
+use tokio::io::{AsyncBufRead, AsyncBufReadExt};
+use tokio_stream::Stream;
 
 /// Parses a single NDJSON line into zero or more [`StreamEvent`]s.
 ///
@@ -135,9 +140,28 @@ fn parse_result(json: &Value) -> Vec<StreamEvent> {
     }
 }
 
+/// Parses an NDJSON byte stream into a [`Stream`] of [`StreamEvent`]s.
+///
+/// Reads lines from the given `reader`, strips ANSI escapes, parses JSON,
+/// and yields `StreamEvent`s. Unparsable lines are silently skipped.
+pub(crate) fn parse_stream(
+    reader: impl AsyncBufRead + Unpin + Send + 'static,
+) -> Pin<Box<dyn Stream<Item = StreamEvent> + Send>> {
+    Box::pin(stream! {
+        let mut lines = reader.lines();
+        while let Ok(Some(line)) = lines.next_line().await {
+            for event in parse_event(&line) {
+                yield event;
+            }
+        }
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::io::Cursor;
+    use tokio_stream::StreamExt;
 
     #[test]
     fn parse_system_init() {
@@ -241,5 +265,53 @@ mod tests {
     #[test]
     fn parse_invalid_json() {
         assert!(parse_event("not json at all").is_empty());
+    }
+
+    #[tokio::test]
+    async fn parse_stream_full_sequence() {
+        let ndjson = include_str!("../tests/fixtures/stream_success.ndjson");
+        let reader = Cursor::new(ndjson.as_bytes().to_vec());
+        let mut stream = parse_stream(reader);
+
+        // 1st event: SystemInit
+        let event = stream.next().await.unwrap();
+        assert!(matches!(event, StreamEvent::SystemInit { .. }));
+
+        // 2nd event: Thinking
+        let event = stream.next().await.unwrap();
+        assert!(matches!(event, StreamEvent::Thinking(_)));
+
+        // 3rd event: Text
+        let event = stream.next().await.unwrap();
+        assert!(matches!(event, StreamEvent::Text(ref t) if t == "Hello!"));
+
+        // 4th event: Result
+        let event = stream.next().await.unwrap();
+        assert!(matches!(event, StreamEvent::Result(ref r) if r.result == "Hello!"));
+
+        // Stream ends
+        assert!(stream.next().await.is_none());
+    }
+
+    #[tokio::test]
+    async fn parse_stream_skips_invalid_lines() {
+        let input = "not json\n\n{\"type\":\"assistant\",\"message\":{\"content\":[{\"type\":\"text\",\"text\":\"ok\"}]}}\n";
+        let reader = Cursor::new(input.as_bytes().to_vec());
+        let mut stream = parse_stream(reader);
+
+        let event = stream.next().await.unwrap();
+        assert!(matches!(event, StreamEvent::Text(ref t) if t == "ok"));
+
+        assert!(stream.next().await.is_none());
+    }
+
+    #[tokio::test]
+    async fn parse_stream_ansi_first_line() {
+        let input = "\x1b[?1004l{\"type\":\"system\",\"subtype\":\"init\",\"session_id\":\"s1\",\"model\":\"haiku\"}\n";
+        let reader = Cursor::new(input.as_bytes().to_vec());
+        let mut stream = parse_stream(reader);
+
+        let event = stream.next().await.unwrap();
+        assert!(matches!(event, StreamEvent::SystemInit { .. }));
     }
 }
