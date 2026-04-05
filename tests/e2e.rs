@@ -24,13 +24,13 @@ async fn e2e_ask_with_haiku() {
 #[tokio::test]
 #[ignore] // Run explicitly with: cargo test -- --ignored
 async fn e2e_ask_stream_with_haiku() {
-    let config = ClaudeConfig::builder()
-        .model("haiku")
-        .max_turns(1)
-        .build();
+    let config = ClaudeConfig::builder().model("haiku").max_turns(1).build();
 
     let client = ClaudeClient::new(config);
-    let mut stream = client.ask_stream("Say 'hello' and nothing else").await.unwrap();
+    let mut stream = client
+        .ask_stream("Say 'hello' and nothing else")
+        .await
+        .unwrap();
 
     let mut got_text = false;
     let mut got_result = false;
