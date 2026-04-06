@@ -1,12 +1,15 @@
 // Items are pub/pub(crate) but not yet wired into the public API (Task 4/5).
 #![allow(dead_code)]
 
+use std::pin::Pin;
 use std::sync::{Arc, Mutex};
+
+use tokio_stream::Stream;
 
 use crate::client::{ClaudeClient, CommandRunner, DefaultRunner};
 use crate::config::{ClaudeConfig, ClaudeConfigBuilder};
 use crate::error::ClaudeError;
-use crate::types::ClaudeResponse;
+use crate::types::{ClaudeResponse, StreamEvent};
 
 /// Stateful multi-turn conversation wrapper around [`ClaudeClient`].
 ///
@@ -101,6 +104,73 @@ impl<R: CommandRunner + Clone> Conversation<R> {
         *self.session_id.lock().unwrap() = Some(response.session_id.clone());
 
         Ok(response)
+    }
+}
+
+/// Wraps a stream to transparently capture `session_id` from
+/// [`StreamEvent::SystemInit`] and [`StreamEvent::Result`].
+fn wrap_stream(
+    inner: Pin<Box<dyn Stream<Item = Result<StreamEvent, ClaudeError>> + Send>>,
+    session_id: Arc<Mutex<Option<String>>>,
+) -> Pin<Box<dyn Stream<Item = Result<StreamEvent, ClaudeError>> + Send>> {
+    Box::pin(async_stream::stream! {
+        tokio::pin!(inner);
+        while let Some(item) = tokio_stream::StreamExt::next(&mut inner).await {
+            if let Ok(ref event) = item {
+                match event {
+                    StreamEvent::SystemInit { session_id: sid, .. } => {
+                        *session_id.lock().unwrap() = Some(sid.clone());
+                    }
+                    StreamEvent::Result(response) => {
+                        *session_id.lock().unwrap() = Some(response.session_id.clone());
+                    }
+                    _ => {}
+                }
+            }
+            yield item;
+        }
+    })
+}
+
+impl Conversation {
+    /// Sends a prompt and returns a stream of events.
+    ///
+    /// Shorthand for `ask_stream_with(prompt, |b| b)`.
+    pub async fn ask_stream(
+        &mut self,
+        prompt: &str,
+    ) -> Result<Pin<Box<dyn Stream<Item = Result<StreamEvent, ClaudeError>> + Send>>, ClaudeError>
+    {
+        self.ask_stream_with(prompt, |b| b).await
+    }
+
+    /// Sends a prompt with per-turn config overrides and returns a stream.
+    ///
+    /// The closure receives a [`ClaudeConfigBuilder`] pre-filled with the base
+    /// config. Overrides apply to this turn only; the base config is unchanged.
+    ///
+    /// All events are passed through transparently. Internally, `session_id`
+    /// is captured from [`StreamEvent::SystemInit`] and updated from
+    /// [`StreamEvent::Result`].
+    pub async fn ask_stream_with<F>(
+        &mut self,
+        prompt: &str,
+        config_fn: F,
+    ) -> Result<Pin<Box<dyn Stream<Item = Result<StreamEvent, ClaudeError>> + Send>>, ClaudeError>
+    where
+        F: FnOnce(ClaudeConfigBuilder) -> ClaudeConfigBuilder,
+    {
+        let builder = config_fn(self.config.to_builder());
+        let mut config = builder.build();
+
+        if let Some(ref id) = *self.session_id.lock().unwrap() {
+            config.resume = Some(id.clone());
+        }
+
+        let client = ClaudeClient::new(config);
+        let inner = client.ask_stream(prompt).await?;
+
+        Ok(wrap_stream(inner, Arc::clone(&self.session_id)))
     }
 }
 
@@ -254,5 +324,71 @@ mod tests {
         let args = &runner.captured_args()[0];
         let idx = args.iter().position(|a| a == "--resume").unwrap();
         assert_eq!(args[idx + 1], "existing-sid");
+    }
+
+    use crate::types::Usage;
+
+    #[tokio::test]
+    async fn wrap_stream_captures_session_id_from_system_init() {
+        let session_id: Arc<Mutex<Option<String>>> = Arc::new(Mutex::new(None));
+        let events: Vec<Result<StreamEvent, ClaudeError>> = vec![
+            Ok(StreamEvent::SystemInit {
+                session_id: "sid-stream-001".into(),
+                model: "haiku".into(),
+            }),
+            Ok(StreamEvent::AssistantText("Hello!".into())),
+        ];
+        let inner: Pin<Box<dyn Stream<Item = Result<StreamEvent, ClaudeError>> + Send>> =
+            Box::pin(tokio_stream::iter(events));
+
+        let wrapped = wrap_stream(inner, Arc::clone(&session_id));
+        tokio::pin!(wrapped);
+
+        let mut count = 0;
+        while (tokio_stream::StreamExt::next(&mut wrapped).await).is_some() {
+            count += 1;
+        }
+
+        assert_eq!(
+            *session_id.lock().unwrap(),
+            Some("sid-stream-001".to_string())
+        );
+        assert_eq!(count, 2);
+    }
+
+    #[tokio::test]
+    async fn wrap_stream_updates_session_id_from_result() {
+        let session_id: Arc<Mutex<Option<String>>> =
+            Arc::new(Mutex::new(Some("old-sid".to_string())));
+        let response = ClaudeResponse {
+            result: "Hello!".into(),
+            is_error: false,
+            duration_ms: 100,
+            num_turns: 1,
+            session_id: "new-sid".into(),
+            total_cost_usd: 0.001,
+            stop_reason: "end_turn".into(),
+            usage: Usage {
+                input_tokens: 10,
+                output_tokens: 5,
+                cache_read_input_tokens: 0,
+                cache_creation_input_tokens: 0,
+            },
+        };
+        let events: Vec<Result<StreamEvent, ClaudeError>> = vec![
+            Ok(StreamEvent::SystemInit {
+                session_id: "old-sid".into(),
+                model: "haiku".into(),
+            }),
+            Ok(StreamEvent::Result(response)),
+        ];
+        let inner: Pin<Box<dyn Stream<Item = Result<StreamEvent, ClaudeError>> + Send>> =
+            Box::pin(tokio_stream::iter(events));
+
+        let wrapped = wrap_stream(inner, Arc::clone(&session_id));
+        tokio::pin!(wrapped);
+        while (tokio_stream::StreamExt::next(&mut wrapped).await).is_some() {}
+
+        assert_eq!(*session_id.lock().unwrap(), Some("new-sid".to_string()));
     }
 }
