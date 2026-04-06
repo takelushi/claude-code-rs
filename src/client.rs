@@ -121,6 +121,19 @@ impl<R: CommandRunner> ClaudeClient<R> {
         Self { config, runner }
     }
 
+    /// Sends a prompt and deserializes the result into `T`.
+    ///
+    /// Requires `json_schema` to be set on the config beforehand.
+    /// Use [`generate_schema`](crate::generate_schema) to auto-generate it
+    /// (requires the `structured` feature).
+    pub async fn ask_structured<T: serde::de::DeserializeOwned>(
+        &self,
+        prompt: &str,
+    ) -> Result<T, ClaudeError> {
+        let response = self.ask(prompt).await?;
+        response.parse_result()
+    }
+
     /// Sends a prompt and returns the response.
     pub async fn ask(&self, prompt: &str) -> Result<ClaudeResponse, ClaudeError> {
         let args = self.config.to_args(prompt);
@@ -340,5 +353,55 @@ mod tests {
         let config = ClaudeConfig::builder().model("haiku").build();
         let client = ClaudeClient::with_runner(config, mock);
         client.ask("test prompt").await.unwrap();
+    }
+
+    #[derive(Debug, serde::Deserialize, PartialEq)]
+    struct TestAnswer {
+        value: i32,
+    }
+
+    fn structured_success_output() -> Output {
+        Output {
+            status: ExitStatus::from_raw(0),
+            stdout: include_bytes!("../tests/fixtures/structured_success.json").to_vec(),
+            stderr: Vec::new(),
+        }
+    }
+
+    #[tokio::test]
+    async fn ask_structured_success() {
+        let mut mock = MockCommandRunner::new();
+        mock.expect_run()
+            .returning(|_| Ok(structured_success_output()));
+
+        let client = ClaudeClient::with_runner(ClaudeConfig::default(), mock);
+        let answer: TestAnswer = client.ask_structured("What is 6*7?").await.unwrap();
+        assert_eq!(answer, TestAnswer { value: 42 });
+    }
+
+    #[tokio::test]
+    async fn ask_structured_deserialization_error() {
+        let mut mock = MockCommandRunner::new();
+        mock.expect_run().returning(|_| Ok(success_output()));
+
+        let client = ClaudeClient::with_runner(ClaudeConfig::default(), mock);
+        let err = client
+            .ask_structured::<TestAnswer>("hello")
+            .await
+            .unwrap_err();
+        assert!(matches!(err, ClaudeError::StructuredOutputError { .. }));
+    }
+
+    #[tokio::test]
+    async fn ask_structured_cli_error() {
+        let mut mock = MockCommandRunner::new();
+        mock.expect_run().returning(|_| Ok(non_zero_output()));
+
+        let client = ClaudeClient::with_runner(ClaudeConfig::default(), mock);
+        let err = client
+            .ask_structured::<TestAnswer>("hello")
+            .await
+            .unwrap_err();
+        assert!(matches!(err, ClaudeError::NonZeroExit { code: 1, .. }));
     }
 }
