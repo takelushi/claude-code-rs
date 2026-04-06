@@ -7,6 +7,7 @@ Claude Code CLI をRustから実行するためのライブラリ。
 - `claude` CLI の `--print` モードをサブプロセスとして実行し、結果を型安全に扱う
 - 出力フォーマット: `--output-format json` (単発) / `--output-format stream-json` (ストリーミング)
 - ライセンス: MIT
+- crates.io への publish は現状検討しない
 
 ## Tech Stack
 
@@ -30,9 +31,11 @@ cargo clippy                   # lint
 cargo fmt --check              # フォーマットチェック
 cargo fmt                      # フォーマット適用
 cargo doc --open               # ドキュメント生成
-cargo run --example simple     # 動作確認
-cargo run --example stream     # ストリーミング動作確認
-cargo run --example stream-all # 全イベント表示
+cargo run --example simple            # 動作確認
+cargo run --example stream            # ストリーミング動作確認
+cargo run --example stream-all        # 全イベント表示
+cargo run --example multi_turn        # 複数ターン会話
+cargo run --example structured_output # 構造化出力
 ```
 
 ### Workflow
@@ -46,17 +49,35 @@ cargo run --example stream-all # 全イベント表示
 
 ```plain
 src/
-  lib.rs        # pub API re-export
-  client.rs     # ClaudeClient (CLI実行の中核)
-  config.rs     # ClaudeConfig (--model, --system-prompt 等のオプション)
-  types.rs      # JSON/stream-json 両方の型定義のみ
-  error.rs      # エラー型
-  stream.rs     # stream-json のパース・イテレーション・バッファリング
+  lib.rs           # pub API re-export
+  client.rs        # ClaudeClient (CLI実行の中核: ask, ask_structured, ask_stream)
+  config.rs        # ClaudeConfig (--model, --system-prompt 等のオプション)
+  conversation.rs  # Conversation (session_id 自動管理の複数ターン会話)
+  types.rs         # ClaudeResponse (parse_result 含む), Usage 等のコア型定義
+  error.rs         # エラー型
+  stream.rs        # StreamEvent + stream-json のパース・イテレーション・バッファリング
+  structured.rs    # generate_schema: JsonSchema → JSON Schema 文字列生成 (structured feature)
 examples/
-  simple.rs     # 最小限の動作確認用サンプル
-  stream.rs     # ストリーミング動作確認用サンプル
-  stream-all.rs # 全イベント表示サンプル
+  simple.rs        # 最小限の動作確認用サンプル
+  stream.rs        # ストリーミング動作確認用サンプル
+  stream-all.rs         # 全イベント表示サンプル
+  multi_turn.rs         # 複数ターン会話サンプル
+  structured_output.rs  # 構造化出力サンプル
 ```
+
+### Feature Flags
+
+```toml
+[features]
+default = ["stream", "structured", "tracing"]
+stream = ["dep:tokio-stream", "dep:async-stream"]  # ask_stream, StreamEvent, Conversation stream methods
+structured = ["dep:schemars"]                       # generate_schema helper
+tracing = ["dep:tracing"]                           # debug/error/info logging in client.rs
+```
+
+- `default-features = false` で最小構成（`ask()` / `ask_structured()` のみ）
+- `StreamEvent` は `stream.rs` モジュール内に定義（`stream` feature でゲート）
+- tracing は `client.rs` 内の条件付きマクロ（`trace_debug!` 等）で吸収
 
 ### Error Variants
 
@@ -67,6 +88,7 @@ examples/
 - `ParseError` — JSON / stream-json レスポンスのデシリアライズ失敗
 - `Timeout` — 指定時間内に応答が返らなかった
 - `Io` — プロセス起動・stdout/stderr 読み取り等の I/O エラー
+- `StructuredOutputError { raw_result, source }` — CLI は成功したが result の JSON デシリアライズに失敗した
 
 ### Testing Strategy
 
@@ -91,6 +113,8 @@ examples/
 - `#[must_use]`, `#[non_exhaustive]` を適切に使う
 - テストでは実際の `claude` CLI を呼ばない (モック or fixture)
 - `mockall` の `returning` は async クロージャ非対応。非同期の遅延が必要なテスト（timeout 等）は手動で trait 実装した struct を使う
+- `MockCommandRunner` は `Clone` 未対応。`Conversation` のように runner を clone するコンポーネントのテストには、手動で trait 実装した `RecordingRunner`（`Arc<Mutex>` で状態共有）を使う
+- `CommandRunner::run()` は完了済みの `Output` を返すため、ストリーミングを抽象化できない。`ask_stream` は常に実プロセスを起動する `DefaultRunner` 限定
 - `CommandRunner` trait に `#[allow(async_fn_in_trait)]` を付与する（ライブラリ内部用のため `Send` 境界の警告を抑制）
 - コードコメント・doc comment は英語で書く
 - CLI オプションの値制限（`effort`, `permission_mode` 等）は enum ではなく `String` + 定数モジュールで表現する。Claude Code CLI は活発に開発されており、enum では新しい値の追加のたびにライブラリリリースが必要になるため

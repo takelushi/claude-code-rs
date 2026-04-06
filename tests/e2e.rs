@@ -1,5 +1,8 @@
-use claude_code_rs::{ClaudeClient, ClaudeConfig, StreamEvent};
+#[cfg(feature = "stream")]
+use claude_code_rs::StreamEvent;
+use claude_code_rs::{ClaudeClient, ClaudeConfig};
 use std::time::Duration;
+#[cfg(feature = "stream")]
 use tokio_stream::StreamExt;
 
 #[tokio::test]
@@ -21,6 +24,7 @@ async fn e2e_ask_with_haiku() {
     assert!(resp.usage.output_tokens > 0);
 }
 
+#[cfg(feature = "stream")]
 #[tokio::test]
 #[ignore] // Run explicitly with: cargo test -- --ignored
 async fn e2e_ask_stream_with_haiku() {

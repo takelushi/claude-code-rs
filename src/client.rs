@@ -1,17 +1,43 @@
+/// Conditional tracing macros — compile to nothing when the `tracing` feature is disabled.
+macro_rules! trace_debug {
+    ($($arg:tt)*) => {
+        #[cfg(feature = "tracing")]
+        tracing::debug!($($arg)*);
+    };
+}
+macro_rules! trace_error {
+    ($($arg:tt)*) => {
+        #[cfg(feature = "tracing")]
+        tracing::error!($($arg)*);
+    };
+}
+macro_rules! trace_info {
+    ($($arg:tt)*) => {
+        #[cfg(feature = "tracing")]
+        tracing::info!($($arg)*);
+    };
+}
+
 #[cfg(test)]
 use mockall::automock;
 
-use std::pin::Pin;
 use std::process::Output;
 
-use tokio::io::BufReader;
 use tokio::process::Command as TokioCommand;
-use tokio_stream::Stream;
 
 use crate::config::ClaudeConfig;
+use crate::conversation::Conversation;
 use crate::error::ClaudeError;
-use crate::stream::parse_stream;
-use crate::types::{ClaudeResponse, StreamEvent, strip_ansi};
+use crate::types::{ClaudeResponse, strip_ansi};
+
+#[cfg(feature = "stream")]
+use crate::stream::{StreamEvent, parse_stream};
+#[cfg(feature = "stream")]
+use std::pin::Pin;
+#[cfg(feature = "stream")]
+use tokio::io::BufReader;
+#[cfg(feature = "stream")]
+use tokio_stream::Stream;
 
 /// Trait abstracting CLI execution. Mockable in tests.
 #[allow(async_fn_in_trait)]
@@ -32,7 +58,7 @@ impl CommandRunner for DefaultRunner {
 }
 
 /// Claude Code CLI client.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct ClaudeClient<R: CommandRunner = DefaultRunner> {
     config: ClaudeConfig,
     runner: R,
@@ -47,7 +73,11 @@ impl ClaudeClient {
             runner: DefaultRunner,
         }
     }
+}
 
+#[cfg(feature = "stream")]
+#[cfg_attr(docsrs, doc(cfg(feature = "stream")))]
+impl ClaudeClient {
     /// Sends a prompt and returns a stream of events.
     ///
     /// Spawns the CLI with `--output-format stream-json` and streams events
@@ -68,7 +98,7 @@ impl ClaudeClient {
     {
         let args = self.config.to_stream_args(prompt);
 
-        tracing::debug!(args = ?args, "spawning claude CLI stream");
+        trace_debug!(args = ?args, "spawning claude CLI stream");
 
         let mut child = TokioCommand::new("claude")
             .args(&args)
@@ -120,18 +150,31 @@ impl<R: CommandRunner> ClaudeClient<R> {
         Self { config, runner }
     }
 
+    /// Sends a prompt and deserializes the result into `T`.
+    ///
+    /// Requires `json_schema` to be set on the config beforehand.
+    /// Use [`generate_schema`](crate::generate_schema) to auto-generate it
+    /// (requires the `structured` feature).
+    pub async fn ask_structured<T: serde::de::DeserializeOwned>(
+        &self,
+        prompt: &str,
+    ) -> Result<T, ClaudeError> {
+        let response = self.ask(prompt).await?;
+        response.parse_result()
+    }
+
     /// Sends a prompt and returns the response.
     pub async fn ask(&self, prompt: &str) -> Result<ClaudeResponse, ClaudeError> {
         let args = self.config.to_args(prompt);
 
-        tracing::debug!(args = ?args, "executing claude CLI");
+        trace_debug!(args = ?args, "executing claude CLI");
 
         let io_result: std::io::Result<Output> = if let Some(timeout) = self.config.timeout {
             tokio::time::timeout(timeout, self.runner.run(&args))
                 .await
                 .map_err(|_| {
                     let err = ClaudeError::Timeout;
-                    tracing::error!(error = %err, "claude CLI failed");
+                    trace_error!(error = %err, "claude CLI failed");
                     err
                 })?
         } else {
@@ -144,7 +187,7 @@ impl<R: CommandRunner> ClaudeClient<R> {
             } else {
                 ClaudeError::Io(e)
             };
-            tracing::error!(error = %err, "claude CLI failed");
+            trace_error!(error = %err, "claude CLI failed");
             err
         })?;
 
@@ -152,7 +195,7 @@ impl<R: CommandRunner> ClaudeClient<R> {
             let code = output.status.code().unwrap_or(-1);
             let stderr = String::from_utf8_lossy(&output.stderr).into_owned();
             let err = ClaudeError::NonZeroExit { code, stderr };
-            tracing::error!(error = %err, "claude CLI failed");
+            trace_error!(error = %err, "claude CLI failed");
             return Err(err);
         }
 
@@ -160,12 +203,35 @@ impl<R: CommandRunner> ClaudeClient<R> {
         let json_str = strip_ansi(&stdout);
         let response: ClaudeResponse = serde_json::from_str(json_str).map_err(|e| {
             let err = ClaudeError::ParseError(e);
-            tracing::error!(error = %err, "claude CLI failed");
+            trace_error!(error = %err, "claude CLI failed");
             err
         })?;
 
-        tracing::info!("claude CLI returned successfully");
+        trace_info!("claude CLI returned successfully");
         Ok(response)
+    }
+}
+
+impl<R: CommandRunner + Clone> ClaudeClient<R> {
+    /// Creates a new [`Conversation`] for multi-turn interaction.
+    ///
+    /// The conversation manages `session_id` automatically, injecting
+    /// `--resume` from the second turn onwards.
+    ///
+    /// Callers must set [`crate::ClaudeConfigBuilder::no_session_persistence`]`(false)`
+    /// for multi-turn to work.
+    #[must_use]
+    pub fn conversation(&self) -> Conversation<R> {
+        Conversation::with_runner(self.config.clone(), self.runner.clone())
+    }
+
+    /// Creates a [`Conversation`] that resumes an existing session.
+    ///
+    /// The first `ask()` / `ask_stream()` call will include `--resume`
+    /// with the given session ID.
+    #[must_use]
+    pub fn conversation_resume(&self, session_id: impl Into<String>) -> Conversation<R> {
+        Conversation::with_runner_resume(self.config.clone(), self.runner.clone(), session_id)
     }
 }
 
@@ -316,5 +382,55 @@ mod tests {
         let config = ClaudeConfig::builder().model("haiku").build();
         let client = ClaudeClient::with_runner(config, mock);
         client.ask("test prompt").await.unwrap();
+    }
+
+    #[derive(Debug, serde::Deserialize, PartialEq)]
+    struct TestAnswer {
+        value: i32,
+    }
+
+    fn structured_success_output() -> Output {
+        Output {
+            status: ExitStatus::from_raw(0),
+            stdout: include_bytes!("../tests/fixtures/structured_success.json").to_vec(),
+            stderr: Vec::new(),
+        }
+    }
+
+    #[tokio::test]
+    async fn ask_structured_success() {
+        let mut mock = MockCommandRunner::new();
+        mock.expect_run()
+            .returning(|_| Ok(structured_success_output()));
+
+        let client = ClaudeClient::with_runner(ClaudeConfig::default(), mock);
+        let answer: TestAnswer = client.ask_structured("What is 6*7?").await.unwrap();
+        assert_eq!(answer, TestAnswer { value: 42 });
+    }
+
+    #[tokio::test]
+    async fn ask_structured_deserialization_error() {
+        let mut mock = MockCommandRunner::new();
+        mock.expect_run().returning(|_| Ok(success_output()));
+
+        let client = ClaudeClient::with_runner(ClaudeConfig::default(), mock);
+        let err = client
+            .ask_structured::<TestAnswer>("hello")
+            .await
+            .unwrap_err();
+        assert!(matches!(err, ClaudeError::StructuredOutputError { .. }));
+    }
+
+    #[tokio::test]
+    async fn ask_structured_cli_error() {
+        let mut mock = MockCommandRunner::new();
+        mock.expect_run().returning(|_| Ok(non_zero_output()));
+
+        let client = ClaudeClient::with_runner(ClaudeConfig::default(), mock);
+        let err = client
+            .ask_structured::<TestAnswer>("hello")
+            .await
+            .unwrap_err();
+        assert!(matches!(err, ClaudeError::NonZeroExit { code: 1, .. }));
     }
 }

@@ -91,6 +91,76 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 }
 ```
 
+### Conversation API
+
+The `Conversation` API manages `session_id` automatically across turns:
+
+```rust
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let config = claude_code_rs::ClaudeConfig::builder()
+        .model("haiku")
+        .no_session_persistence(false) // required for multi-turn
+        .max_turns(1)
+        .build();
+    let client = claude_code_rs::ClaudeClient::new(config);
+
+    let mut conv = client.conversation();
+    let r1 = conv.ask("What is 2+2?").await?;
+    println!("Turn 1: {}", r1.result);
+
+    let r2 = conv.ask("What was my previous question?").await?;
+    println!("Turn 2: {}", r2.result);
+
+    Ok(())
+}
+```
+
+Per-turn config overrides are supported via `ask_with`:
+
+```rust
+conv.ask_with("complex question", |b| b.max_turns(5).effort("high")).await?;
+```
+
+### Structured Output
+
+Use `generate_schema` and `ask_structured` to get typed responses:
+
+```rust
+use schemars::JsonSchema;
+use serde::Deserialize;
+
+#[derive(Debug, Deserialize, JsonSchema)]
+struct CityInfo {
+    name: String,
+    country: String,
+    population: u64,
+}
+
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let schema = claude_code_rs::generate_schema::<CityInfo>()?;
+    let config = claude_code_rs::ClaudeConfig::builder()
+        .model("haiku")
+        .max_turns(1)
+        .json_schema(&schema)
+        .build();
+    let client = claude_code_rs::ClaudeClient::new(config);
+
+    let city: CityInfo = client.ask_structured("Tell me about Tokyo").await?;
+    println!("{}: population {}", city.name, city.population);
+
+    Ok(())
+}
+```
+
+Requires the `structured` feature (enabled by default). Add `schemars` to your dependencies:
+
+```toml
+[dependencies]
+schemars = "0.8"
+```
+
 ## Context Minimization Defaults
 
 By default, `claude-code-rs` applies a minimal configuration to reduce unnecessary context sent to the CLI. This keeps costs down and avoids side effects from user-level settings:

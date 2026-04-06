@@ -1,15 +1,16 @@
-// Items are pub/pub(crate) but not yet wired into the public API (Task 4/5).
-#![allow(dead_code)]
-
-use std::pin::Pin;
 use std::sync::{Arc, Mutex};
-
-use tokio_stream::Stream;
 
 use crate::client::{ClaudeClient, CommandRunner, DefaultRunner};
 use crate::config::{ClaudeConfig, ClaudeConfigBuilder};
 use crate::error::ClaudeError;
-use crate::types::{ClaudeResponse, StreamEvent};
+use crate::types::ClaudeResponse;
+
+#[cfg(feature = "stream")]
+use crate::stream::StreamEvent;
+#[cfg(feature = "stream")]
+use std::pin::Pin;
+#[cfg(feature = "stream")]
+use tokio_stream::Stream;
 
 /// Stateful multi-turn conversation wrapper around [`ClaudeClient`].
 ///
@@ -107,6 +108,7 @@ impl<R: CommandRunner + Clone> Conversation<R> {
     }
 }
 
+#[cfg(feature = "stream")]
 /// Wraps a stream to transparently capture `session_id` from
 /// [`StreamEvent::SystemInit`] and [`StreamEvent::Result`].
 fn wrap_stream(
@@ -132,10 +134,21 @@ fn wrap_stream(
     })
 }
 
+#[cfg(feature = "stream")]
+#[cfg_attr(docsrs, doc(cfg(feature = "stream")))]
 impl Conversation {
     /// Sends a prompt and returns a stream of events.
     ///
     /// Shorthand for `ask_stream_with(prompt, |b| b)`.
+    ///
+    /// Only available for `Conversation<DefaultRunner>` (i.e., conversations
+    /// created via [`ClaudeClient::new`]). The [`CommandRunner`] trait's
+    /// [`run`](CommandRunner::run) method returns a completed [`std::process::Output`],
+    /// which cannot support streaming; therefore streaming always spawns a
+    /// real CLI subprocess.
+    ///
+    /// **Note:** Timeout from the base config is **not** applied to streams.
+    /// Use [`tokio_stream::StreamExt::timeout()`] if needed.
     pub async fn ask_stream(
         &mut self,
         prompt: &str,
@@ -152,6 +165,9 @@ impl Conversation {
     /// All events are passed through transparently. Internally, `session_id`
     /// is captured from [`StreamEvent::SystemInit`] and updated from
     /// [`StreamEvent::Result`].
+    ///
+    /// Only available for `Conversation<DefaultRunner>`. See [`ask_stream`](Self::ask_stream)
+    /// for details on the streaming constraint.
     pub async fn ask_stream_with<F>(
         &mut self,
         prompt: &str,
@@ -326,8 +342,12 @@ mod tests {
         assert_eq!(args[idx + 1], "existing-sid");
     }
 
+    #[cfg(feature = "stream")]
+    use crate::stream::StreamEvent;
+    #[cfg(feature = "stream")]
     use crate::types::Usage;
 
+    #[cfg(feature = "stream")]
     #[tokio::test]
     async fn wrap_stream_captures_session_id_from_system_init() {
         let session_id: Arc<Mutex<Option<String>>> = Arc::new(Mutex::new(None));
@@ -356,6 +376,7 @@ mod tests {
         assert_eq!(count, 2);
     }
 
+    #[cfg(feature = "stream")]
     #[tokio::test]
     async fn wrap_stream_updates_session_id_from_result() {
         let session_id: Arc<Mutex<Option<String>>> =
@@ -390,5 +411,29 @@ mod tests {
         while (tokio_stream::StreamExt::next(&mut wrapped).await).is_some() {}
 
         assert_eq!(*session_id.lock().unwrap(), Some("new-sid".to_string()));
+    }
+
+    #[tokio::test]
+    async fn client_conversation_creates_working_conversation() {
+        let runner = RecordingRunner::new(vec![make_success_output("sid-001")]);
+        let config = ClaudeConfig::builder().model("haiku").build();
+        let client = ClaudeClient::with_runner(config, runner);
+
+        let mut conv = client.conversation();
+        let resp = conv.ask("hello").await.unwrap();
+        assert_eq!(resp.session_id, "sid-001");
+    }
+
+    #[tokio::test]
+    async fn client_conversation_resume_sends_resume() {
+        let runner = RecordingRunner::new(vec![make_success_output("sid-001")]);
+        let client = ClaudeClient::with_runner(ClaudeConfig::default(), runner.clone());
+
+        let mut conv = client.conversation_resume("existing-sid");
+        conv.ask("hello").await.unwrap();
+
+        let args = &runner.captured_args()[0];
+        let idx = args.iter().position(|a| a == "--resume").unwrap();
+        assert_eq!(args[idx + 1], "existing-sid");
     }
 }

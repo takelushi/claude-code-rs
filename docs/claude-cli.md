@@ -33,6 +33,12 @@
 
 セッションをディスクに保存しない。`--resume` によるセッション再開が不要な場合（ライブラリからの単発呼び出し等）に使う。
 
+### --resume との組み合わせ制約
+
+ライブラリのデフォルトでは `--no-session-persistence` が有効（セッション非永続化）。このとき `--resume <session_id>` を指定するとセッションがディスクに存在しないため CLI がエラーを返す。
+
+複数ターン会話（`Conversation` API）を使う場合は `no_session_persistence(false)` を明示的に設定し、セッション永続化を有効にする必要がある。
+
 ## stream-json のイベント型
 
 `--output-format stream-json --verbose` で出力される NDJSON の各イベント:
