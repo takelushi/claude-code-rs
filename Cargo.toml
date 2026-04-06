@@ -43,3 +43,7 @@ required-features = ["stream"]
 
 [[example]]
 name = "multi_turn"
+
+[[example]]
+name = "structured_output"
+required-features = ["structured"]
