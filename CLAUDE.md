@@ -47,13 +47,13 @@ cargo run --example stream-all # 全イベント表示
 ```plain
 src/
   lib.rs           # pub API re-export
-  client.rs        # ClaudeClient (CLI実行の中核)
+  client.rs        # ClaudeClient (CLI実行の中核: ask, ask_structured, ask_stream)
   config.rs        # ClaudeConfig (--model, --system-prompt 等のオプション)
   conversation.rs  # Conversation (session_id 自動管理の複数ターン会話)
-  types.rs         # ClaudeResponse, Usage 等のコア型定義
+  types.rs         # ClaudeResponse (parse_result 含む), Usage 等のコア型定義
   error.rs         # エラー型
   stream.rs        # StreamEvent + stream-json のパース・イテレーション・バッファリング
-  structured.rs    # generate_schema (structured feature gated)
+  structured.rs    # generate_schema: JsonSchema → JSON Schema 文字列生成 (structured feature)
 examples/
   simple.rs        # 最小限の動作確認用サンプル
   stream.rs        # ストリーミング動作確認用サンプル
