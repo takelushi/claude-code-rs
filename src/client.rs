@@ -11,8 +11,9 @@ use tokio_stream::Stream;
 use crate::config::ClaudeConfig;
 use crate::conversation::Conversation;
 use crate::error::ClaudeError;
+use crate::stream::StreamEvent;
 use crate::stream::parse_stream;
-use crate::types::{ClaudeResponse, StreamEvent, strip_ansi};
+use crate::types::{ClaudeResponse, strip_ansi};
 
 /// Trait abstracting CLI execution. Mockable in tests.
 #[allow(async_fn_in_trait)]

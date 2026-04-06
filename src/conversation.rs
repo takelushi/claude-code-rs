@@ -6,7 +6,8 @@ use tokio_stream::Stream;
 use crate::client::{ClaudeClient, CommandRunner, DefaultRunner};
 use crate::config::{ClaudeConfig, ClaudeConfigBuilder};
 use crate::error::ClaudeError;
-use crate::types::{ClaudeResponse, StreamEvent};
+use crate::stream::StreamEvent;
+use crate::types::ClaudeResponse;
 
 /// Stateful multi-turn conversation wrapper around [`ClaudeClient`].
 ///
