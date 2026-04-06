@@ -5,6 +5,12 @@ edition = "2024"
 rust-version = "1.93"
 license = "MIT"
 description = "A Rust library for executing Claude Code CLI"
+repository = "https://github.com/takelushi/claude-code-rs"
+homepage = "https://github.com/takelushi/claude-code-rs"
+documentation = "https://docs.rs/claude-code-rs"
+readme = "README.md"
+keywords = ["claude", "anthropic", "cli", "ai", "llm"]
+categories = ["api-bindings", "asynchronous"]
 
 [dependencies]
 tokio = { version = "1", features = ["process", "io-util", "rt-multi-thread", "macros", "time"] }
