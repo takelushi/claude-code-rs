@@ -27,8 +27,8 @@ schemars = { version = "0.8", optional = true }
 | API | feature なし | `structured` 有効 |
 |-----|-------------|-----------------|
 | `ClaudeResponse::parse_result::<T>()` | 使える | 使える |
+| `ClaudeClient::ask_structured::<T>()` | 使える | 使える |
 | `generate_schema::<T>()` | なし | 使える |
-| `ClaudeClient::ask_structured::<T>()` | なし | 使える |
 
 ### エラー型
 
@@ -89,7 +89,6 @@ pub fn generate_schema<T: JsonSchema>() -> Result<String, ClaudeError> {
 
 ```rust
 // src/client.rs
-#[cfg(feature = "structured")]
 impl<R: CommandRunner> ClaudeClient<R> {
     /// Sends a prompt and deserializes the result into `T`.
     ///
@@ -105,7 +104,7 @@ impl<R: CommandRunner> ClaudeClient<R> {
 }
 ```
 
-- trait bound は `DeserializeOwned` のみ（`JsonSchema` は要求しない → 手動スキーマユーザーも使える）
+- feature gate なし（`DeserializeOwned` のみで `schemars` 不要 → 手動スキーマユーザーも使える）
 - スキーマ設定はしない（ユーザーが config 構築時に設定する責務）
 
 ## 使用例
@@ -186,7 +185,7 @@ src/
 - 正常系: 有効な JSON Schema 文字列が返る
 - 正常系: 生成されたスキーマに期待するプロパティが含まれる
 
-### `ask_structured`（src/client.rs, feature gated）
+### `ask_structured`（src/client.rs）
 - 正常系: モック + fixture で `T` が返る
 - 異常系: CLI 成功だが result が `T` に合わない → `StructuredOutputError`
 - 異常系: CLI 失敗 → 既存エラー（`NonZeroExit` 等）がそのまま返る
