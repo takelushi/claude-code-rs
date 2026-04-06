@@ -1,5 +1,6 @@
 mod client;
 mod config;
+mod conversation;
 mod error;
 mod stream;
 mod types;
