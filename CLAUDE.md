@@ -93,6 +93,8 @@ examples/
 - `#[must_use]`, `#[non_exhaustive]` を適切に使う
 - テストでは実際の `claude` CLI を呼ばない (モック or fixture)
 - `mockall` の `returning` は async クロージャ非対応。非同期の遅延が必要なテスト（timeout 等）は手動で trait 実装した struct を使う
+- `MockCommandRunner` は `Clone` 未対応。`Conversation` のように runner を clone するコンポーネントのテストには、手動で trait 実装した `RecordingRunner`（`Arc<Mutex>` で状態共有）を使う
+- `CommandRunner::run()` は完了済みの `Output` を返すため、ストリーミングを抽象化できない。`ask_stream` は常に実プロセスを起動する `DefaultRunner` 限定
 - `CommandRunner` trait に `#[allow(async_fn_in_trait)]` を付与する（ライブラリ内部用のため `Send` 境界の警告を抑制）
 - コードコメント・doc comment は英語で書く
 - CLI オプションの値制限（`effort`, `permission_mode` 等）は enum ではなく `String` + 定数モジュールで表現する。Claude Code CLI は活発に開発されており、enum では新しい値の追加のたびにライブラリリリースが必要になるため
