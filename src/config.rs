@@ -7,12 +7,61 @@ pub struct ClaudeConfig {
     pub model: Option<String>,
     /// System prompt (`--system-prompt`). Defaults to empty string when `None`.
     pub system_prompt: Option<String>,
+    /// Append to the default system prompt (`--append-system-prompt`).
+    pub append_system_prompt: Option<String>,
     /// Maximum number of turns (`--max-turns`).
     pub max_turns: Option<u32>,
-    /// Timeout duration. No timeout when `None`.
+    /// Timeout duration. No timeout when `None`. Library-only; not a CLI flag.
     pub timeout: Option<Duration>,
+    /// Fallback model when default is overloaded (`--fallback-model`).
+    pub fallback_model: Option<String>,
+    /// Effort level (`--effort`). Use [`effort`] constants for known values.
+    pub effort: Option<String>,
+    /// Maximum dollar amount for API calls (`--max-budget-usd`).
+    pub max_budget_usd: Option<f64>,
+    /// Tools to allow (`--allowedTools`).
+    pub allowed_tools: Vec<String>,
+    /// Tools to deny (`--disallowedTools`).
+    pub disallowed_tools: Vec<String>,
+    /// Built-in tool set override (`--tools`). Defaults to `""` (none) when `None`.
+    pub tools: Option<String>,
+    /// MCP server configs (`--mcp-config`). Defaults to `{"mcpServers":{}}` when empty.
+    pub mcp_config: Vec<String>,
+    /// Setting sources to load (`--setting-sources`). Defaults to `""` (none) when `None`.
+    pub setting_sources: Option<String>,
+    /// Path to settings file or JSON string (`--settings`).
+    pub settings: Option<String>,
+    /// JSON Schema for structured output (`--json-schema`).
+    pub json_schema: Option<String>,
     /// Include partial message chunks in stream output (`--include-partial-messages`).
     pub include_partial_messages: Option<bool>,
+    /// Include hook events in stream output (`--include-hook-events`).
+    pub include_hook_events: Option<bool>,
+    /// Permission mode (`--permission-mode`). Use [`permission_mode`] constants for known values.
+    pub permission_mode: Option<String>,
+    /// Bypass all permission checks (`--dangerously-skip-permissions`).
+    pub dangerously_skip_permissions: Option<bool>,
+    /// Additional directories for tool access (`--add-dir`).
+    pub add_dir: Vec<String>,
+    /// File resources to download at startup (`--file`).
+    pub file: Vec<String>,
+    /// Resume a conversation by session ID (`--resume`).
+    pub resume: Option<String>,
+    /// Use a specific session ID (`--session-id`).
+    pub session_id: Option<String>,
+    /// Minimal mode (`--bare`).
+    pub bare: Option<bool>,
+    /// Disable session persistence (`--no-session-persistence`). Enabled by default.
+    pub no_session_persistence: Option<bool>,
+    /// Disable all skills (`--disable-slash-commands`). Enabled by default.
+    pub disable_slash_commands: Option<bool>,
+    /// Only use MCP servers from `--mcp-config` (`--strict-mcp-config`). Enabled by default.
+    pub strict_mcp_config: Option<bool>,
+    /// Arbitrary CLI arguments for forward compatibility.
+    ///
+    /// Appended before the prompt. Use typed fields when available;
+    /// duplicating a typed field here may cause unpredictable CLI behavior.
+    pub extra_args: Vec<String>,
 }
 
 impl ClaudeConfig {
@@ -93,9 +142,32 @@ impl ClaudeConfig {
 pub struct ClaudeConfigBuilder {
     model: Option<String>,
     system_prompt: Option<String>,
+    append_system_prompt: Option<String>,
     max_turns: Option<u32>,
     timeout: Option<Duration>,
+    fallback_model: Option<String>,
+    effort: Option<String>,
+    max_budget_usd: Option<f64>,
+    allowed_tools: Vec<String>,
+    disallowed_tools: Vec<String>,
+    tools: Option<String>,
+    mcp_config: Vec<String>,
+    setting_sources: Option<String>,
+    settings: Option<String>,
+    json_schema: Option<String>,
     include_partial_messages: Option<bool>,
+    include_hook_events: Option<bool>,
+    permission_mode: Option<String>,
+    dangerously_skip_permissions: Option<bool>,
+    add_dir: Vec<String>,
+    file: Vec<String>,
+    resume: Option<String>,
+    session_id: Option<String>,
+    bare: Option<bool>,
+    no_session_persistence: Option<bool>,
+    disable_slash_commands: Option<bool>,
+    strict_mcp_config: Option<bool>,
+    extra_args: Vec<String>,
 }
 
 impl ClaudeConfigBuilder {
@@ -113,6 +185,13 @@ impl ClaudeConfigBuilder {
         self
     }
 
+    /// Sets the append system prompt.
+    #[must_use]
+    pub fn append_system_prompt(mut self, prompt: impl Into<String>) -> Self {
+        self.append_system_prompt = Some(prompt.into());
+        self
+    }
+
     /// Sets the maximum number of turns.
     #[must_use]
     pub fn max_turns(mut self, max_turns: u32) -> Self {
@@ -127,10 +206,212 @@ impl ClaudeConfigBuilder {
         self
     }
 
+    /// Sets the fallback model.
+    #[must_use]
+    pub fn fallback_model(mut self, model: impl Into<String>) -> Self {
+        self.fallback_model = Some(model.into());
+        self
+    }
+
+    /// Sets the effort level. See [`effort`] constants for known values.
+    #[must_use]
+    pub fn effort(mut self, effort: impl Into<String>) -> Self {
+        self.effort = Some(effort.into());
+        self
+    }
+
+    /// Sets the maximum budget in USD.
+    #[must_use]
+    pub fn max_budget_usd(mut self, budget: f64) -> Self {
+        self.max_budget_usd = Some(budget);
+        self
+    }
+
+    /// Sets allowed tools (replaces any previous values).
+    #[must_use]
+    pub fn allowed_tools(mut self, tools: impl IntoIterator<Item = impl Into<String>>) -> Self {
+        self.allowed_tools = tools.into_iter().map(Into::into).collect();
+        self
+    }
+
+    /// Adds a single allowed tool.
+    #[must_use]
+    pub fn add_allowed_tool(mut self, tool: impl Into<String>) -> Self {
+        self.allowed_tools.push(tool.into());
+        self
+    }
+
+    /// Sets disallowed tools (replaces any previous values).
+    #[must_use]
+    pub fn disallowed_tools(mut self, tools: impl IntoIterator<Item = impl Into<String>>) -> Self {
+        self.disallowed_tools = tools.into_iter().map(Into::into).collect();
+        self
+    }
+
+    /// Adds a single disallowed tool.
+    #[must_use]
+    pub fn add_disallowed_tool(mut self, tool: impl Into<String>) -> Self {
+        self.disallowed_tools.push(tool.into());
+        self
+    }
+
+    /// Sets the built-in tool set. `""` disables all, `"default"` enables all.
+    #[must_use]
+    pub fn tools(mut self, tools: impl Into<String>) -> Self {
+        self.tools = Some(tools.into());
+        self
+    }
+
+    /// Sets MCP server configs (replaces any previous values).
+    #[must_use]
+    pub fn mcp_configs(mut self, configs: impl IntoIterator<Item = impl Into<String>>) -> Self {
+        self.mcp_config = configs.into_iter().map(Into::into).collect();
+        self
+    }
+
+    /// Adds a single MCP server config.
+    #[must_use]
+    pub fn add_mcp_config(mut self, config: impl Into<String>) -> Self {
+        self.mcp_config.push(config.into());
+        self
+    }
+
+    /// Sets the setting sources to load.
+    #[must_use]
+    pub fn setting_sources(mut self, sources: impl Into<String>) -> Self {
+        self.setting_sources = Some(sources.into());
+        self
+    }
+
+    /// Sets the path to a settings file or JSON string.
+    #[must_use]
+    pub fn settings(mut self, settings: impl Into<String>) -> Self {
+        self.settings = Some(settings.into());
+        self
+    }
+
+    /// Sets the JSON Schema for structured output.
+    #[must_use]
+    pub fn json_schema(mut self, schema: impl Into<String>) -> Self {
+        self.json_schema = Some(schema.into());
+        self
+    }
+
     /// Enables or disables partial message chunks in stream output.
     #[must_use]
     pub fn include_partial_messages(mut self, enabled: bool) -> Self {
         self.include_partial_messages = Some(enabled);
+        self
+    }
+
+    /// Enables or disables hook events in stream output.
+    #[must_use]
+    pub fn include_hook_events(mut self, enabled: bool) -> Self {
+        self.include_hook_events = Some(enabled);
+        self
+    }
+
+    /// Sets the permission mode. See [`permission_mode`] constants for known values.
+    #[must_use]
+    pub fn permission_mode(mut self, mode: impl Into<String>) -> Self {
+        self.permission_mode = Some(mode.into());
+        self
+    }
+
+    /// Enables or disables bypassing all permission checks.
+    #[must_use]
+    pub fn dangerously_skip_permissions(mut self, enabled: bool) -> Self {
+        self.dangerously_skip_permissions = Some(enabled);
+        self
+    }
+
+    /// Sets additional directories (replaces any previous values).
+    #[must_use]
+    pub fn add_dirs(mut self, dirs: impl IntoIterator<Item = impl Into<String>>) -> Self {
+        self.add_dir = dirs.into_iter().map(Into::into).collect();
+        self
+    }
+
+    /// Adds a single additional directory.
+    #[must_use]
+    pub fn add_dir(mut self, dir: impl Into<String>) -> Self {
+        self.add_dir.push(dir.into());
+        self
+    }
+
+    /// Sets file resources (replaces any previous values).
+    #[must_use]
+    pub fn files(mut self, files: impl IntoIterator<Item = impl Into<String>>) -> Self {
+        self.file = files.into_iter().map(Into::into).collect();
+        self
+    }
+
+    /// Adds a single file resource.
+    #[must_use]
+    pub fn file(mut self, file: impl Into<String>) -> Self {
+        self.file.push(file.into());
+        self
+    }
+
+    /// Sets the session ID to resume.
+    #[must_use]
+    pub fn resume(mut self, session_id: impl Into<String>) -> Self {
+        self.resume = Some(session_id.into());
+        self
+    }
+
+    /// Sets a specific session ID.
+    #[must_use]
+    pub fn session_id(mut self, id: impl Into<String>) -> Self {
+        self.session_id = Some(id.into());
+        self
+    }
+
+    /// Enables or disables bare/minimal mode.
+    #[must_use]
+    pub fn bare(mut self, enabled: bool) -> Self {
+        self.bare = Some(enabled);
+        self
+    }
+
+    /// Enables or disables session persistence.
+    /// Enabled by default; set to `false` to allow session persistence.
+    #[must_use]
+    pub fn no_session_persistence(mut self, enabled: bool) -> Self {
+        self.no_session_persistence = Some(enabled);
+        self
+    }
+
+    /// Enables or disables slash commands.
+    /// Disabled by default; set to `false` to enable slash commands.
+    #[must_use]
+    pub fn disable_slash_commands(mut self, enabled: bool) -> Self {
+        self.disable_slash_commands = Some(enabled);
+        self
+    }
+
+    /// Enables or disables strict MCP config mode.
+    /// Enabled by default; set to `false` to allow non-`--mcp-config` MCP servers.
+    #[must_use]
+    pub fn strict_mcp_config(mut self, enabled: bool) -> Self {
+        self.strict_mcp_config = Some(enabled);
+        self
+    }
+
+    /// Sets arbitrary extra CLI arguments (replaces any previous values).
+    ///
+    /// These are appended before the prompt. Use typed fields when available;
+    /// duplicating a typed field here may cause unpredictable CLI behavior.
+    #[must_use]
+    pub fn extra_args(mut self, args: impl IntoIterator<Item = impl Into<String>>) -> Self {
+        self.extra_args = args.into_iter().map(Into::into).collect();
+        self
+    }
+
+    /// Adds a single extra CLI argument.
+    #[must_use]
+    pub fn add_extra_arg(mut self, arg: impl Into<String>) -> Self {
+        self.extra_args.push(arg.into());
         self
     }
 
@@ -140,9 +421,32 @@ impl ClaudeConfigBuilder {
         ClaudeConfig {
             model: self.model,
             system_prompt: self.system_prompt,
+            append_system_prompt: self.append_system_prompt,
             max_turns: self.max_turns,
             timeout: self.timeout,
+            fallback_model: self.fallback_model,
+            effort: self.effort,
+            max_budget_usd: self.max_budget_usd,
+            allowed_tools: self.allowed_tools,
+            disallowed_tools: self.disallowed_tools,
+            tools: self.tools,
+            mcp_config: self.mcp_config,
+            setting_sources: self.setting_sources,
+            settings: self.settings,
+            json_schema: self.json_schema,
             include_partial_messages: self.include_partial_messages,
+            include_hook_events: self.include_hook_events,
+            permission_mode: self.permission_mode,
+            dangerously_skip_permissions: self.dangerously_skip_permissions,
+            add_dir: self.add_dir,
+            file: self.file,
+            resume: self.resume,
+            session_id: self.session_id,
+            bare: self.bare,
+            no_session_persistence: self.no_session_persistence,
+            disable_slash_commands: self.disable_slash_commands,
+            strict_mcp_config: self.strict_mcp_config,
+            extra_args: self.extra_args,
         }
     }
 }
@@ -273,5 +577,61 @@ mod tests {
             .include_partial_messages(true)
             .build();
         assert_eq!(config.include_partial_messages, Some(true));
+    }
+
+    #[test]
+    fn all_new_fields_in_builder() {
+        let config = ClaudeConfig::builder()
+            .append_system_prompt("extra context")
+            .fallback_model("haiku")
+            .effort("high")
+            .max_budget_usd(1.0)
+            .allowed_tools(["Bash", "Edit"])
+            .disallowed_tools(["Write"])
+            .tools("Bash,Edit")
+            .mcp_configs(["config.json"])
+            .setting_sources("user,project")
+            .settings("settings.json")
+            .json_schema(r#"{"type":"object"}"#)
+            .include_hook_events(true)
+            .permission_mode("auto")
+            .dangerously_skip_permissions(true)
+            .add_dirs(["/path/a"])
+            .file("spec:file.txt")
+            .resume("session-123")
+            .session_id("uuid-456")
+            .bare(true)
+            .no_session_persistence(false)
+            .disable_slash_commands(false)
+            .strict_mcp_config(false)
+            .extra_args(["--custom", "val"])
+            .build();
+
+        assert_eq!(
+            config.append_system_prompt.as_deref(),
+            Some("extra context")
+        );
+        assert_eq!(config.fallback_model.as_deref(), Some("haiku"));
+        assert_eq!(config.effort.as_deref(), Some("high"));
+        assert_eq!(config.max_budget_usd, Some(1.0));
+        assert_eq!(config.allowed_tools, vec!["Bash", "Edit"]);
+        assert_eq!(config.disallowed_tools, vec!["Write"]);
+        assert_eq!(config.tools.as_deref(), Some("Bash,Edit"));
+        assert_eq!(config.mcp_config, vec!["config.json"]);
+        assert_eq!(config.setting_sources.as_deref(), Some("user,project"));
+        assert_eq!(config.settings.as_deref(), Some("settings.json"));
+        assert_eq!(config.json_schema.as_deref(), Some(r#"{"type":"object"}"#));
+        assert_eq!(config.include_hook_events, Some(true));
+        assert_eq!(config.permission_mode.as_deref(), Some("auto"));
+        assert_eq!(config.dangerously_skip_permissions, Some(true));
+        assert_eq!(config.add_dir, vec!["/path/a"]);
+        assert_eq!(config.file, vec!["spec:file.txt"]);
+        assert_eq!(config.resume.as_deref(), Some("session-123"));
+        assert_eq!(config.session_id.as_deref(), Some("uuid-456"));
+        assert_eq!(config.bare, Some(true));
+        assert_eq!(config.no_session_persistence, Some(false));
+        assert_eq!(config.disable_slash_commands, Some(false));
+        assert_eq!(config.strict_mcp_config, Some(false));
+        assert_eq!(config.extra_args, vec!["--custom", "val"]);
     }
 }
