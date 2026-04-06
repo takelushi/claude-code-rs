@@ -1015,6 +1015,7 @@ mod tests {
             .system_prompt("test")
             .max_turns(5)
             .timeout(Duration::from_secs(30))
+            .stream_idle_timeout(Duration::from_secs(45))
             .no_session_persistence(false)
             .resume("session-123")
             .build();
@@ -1025,6 +1026,7 @@ mod tests {
         assert_eq!(rebuilt.system_prompt, original.system_prompt);
         assert_eq!(rebuilt.max_turns, original.max_turns);
         assert_eq!(rebuilt.timeout, original.timeout);
+        assert_eq!(rebuilt.stream_idle_timeout, original.stream_idle_timeout);
         assert_eq!(
             rebuilt.no_session_persistence,
             original.no_session_persistence

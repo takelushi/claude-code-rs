@@ -125,3 +125,5 @@ message_start
 tokio の `Child` は drop 時にプロセスを kill しない。detach されるだけであり、親プロセスが終了するまでゾンビ的に残る可能性がある。
 
 ライブラリでは `ask_stream` 内で `ChildGuard` RAII ラッパーを使い、ストリーム drop 時に `start_kill()` で SIGKILL を送ることで対処している。`start_kill()` は非同期ではなく即座にシグナルを送るため `Drop` トレイト内から呼べる。
+
+`start_kill()` はシグナル送信のみで `wait()` は呼ばないため、プロセスは SIGKILL 受信後も一時的にゾンビ状態になる。tokio ランタイムが内部のプロセスリーパーで自動的に回収するため、実用上は問題ない。
