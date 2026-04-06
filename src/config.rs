@@ -2,6 +2,7 @@ use std::time::Duration;
 
 /// Configuration options for Claude CLI execution.
 #[derive(Debug, Clone, Default)]
+#[non_exhaustive]
 pub struct ClaudeConfig {
     /// Model to use (`--model`).
     pub model: Option<String>,
@@ -928,5 +929,16 @@ mod tests {
         assert!(args.contains(&"sonnet".to_string()));
         assert!(args.contains(&"--custom".to_string()));
         assert!(args.contains(&"val".to_string()));
+    }
+
+    #[test]
+    fn disallowed_tools_multiple() {
+        let config = ClaudeConfig::builder()
+            .disallowed_tools(["Write", "Bash"])
+            .build();
+        let args = config.to_args("test");
+        let idx = args.iter().position(|a| a == "--disallowedTools").unwrap();
+        assert_eq!(args[idx + 1], "Write");
+        assert_eq!(args[idx + 2], "Bash");
     }
 }

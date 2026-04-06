@@ -42,7 +42,7 @@ pub struct Usage {
 ///
 /// - **Delta variants** ([`Text`](Self::Text), [`Thinking`](Self::Thinking), etc.) — real-time
 ///   token-level chunks from `stream_event`. Requires
-///   [`ClaudeConfigBuilder::include_partial_messages`] to be enabled.
+///   [`crate::ClaudeConfigBuilder::include_partial_messages`] to be enabled.
 /// - **Assistant variants** ([`AssistantText`](Self::AssistantText),
 ///   [`AssistantThinking`](Self::AssistantThinking)) — complete messages from `assistant` events.
 ///   Always sent regardless of `include_partial_messages`.
@@ -61,11 +61,11 @@ pub enum StreamEvent {
     },
     /// Thinking delta chunk from real-time streaming (`stream_event` / `thinking_delta`).
     ///
-    /// Only emitted when [`ClaudeConfigBuilder::include_partial_messages`] is enabled.
+    /// Only emitted when [`crate::ClaudeConfigBuilder::include_partial_messages`] is enabled.
     Thinking(String),
     /// Text delta chunk from real-time streaming (`stream_event` / `text_delta`).
     ///
-    /// Only emitted when [`ClaudeConfigBuilder::include_partial_messages`] is enabled.
+    /// Only emitted when [`crate::ClaudeConfigBuilder::include_partial_messages`] is enabled.
     Text(String),
     /// Complete thinking text from `assistant` event. Always emitted.
     AssistantThinking(String),

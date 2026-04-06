@@ -54,12 +54,12 @@ impl ClaudeClient {
     /// in real-time. The stream ends with a [`StreamEvent::Result`] on success.
     ///
     /// For real-time token-level streaming, enable
-    /// [`ClaudeConfigBuilder::include_partial_messages`]. This produces
+    /// [`crate::ClaudeConfigBuilder::include_partial_messages`]. This produces
     /// [`StreamEvent::Text`] / [`StreamEvent::Thinking`] delta chunks.
     /// Without it, only complete [`StreamEvent::AssistantText`] /
     /// [`StreamEvent::AssistantThinking`] messages are emitted.
     ///
-    /// Timeout is not applied to streams. Use [`StreamExt::timeout()`]
+    /// Timeout is not applied to streams. Use [`tokio_stream::StreamExt::timeout()`]
     /// if needed.
     pub async fn ask_stream(
         &self,
