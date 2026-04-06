@@ -21,19 +21,23 @@ macro_rules! trace_info {
 #[cfg(test)]
 use mockall::automock;
 
-use std::pin::Pin;
 use std::process::Output;
 
-use tokio::io::BufReader;
 use tokio::process::Command as TokioCommand;
-use tokio_stream::Stream;
 
 use crate::config::ClaudeConfig;
 use crate::conversation::Conversation;
 use crate::error::ClaudeError;
-use crate::stream::StreamEvent;
-use crate::stream::parse_stream;
 use crate::types::{ClaudeResponse, strip_ansi};
+
+#[cfg(feature = "stream")]
+use crate::stream::{StreamEvent, parse_stream};
+#[cfg(feature = "stream")]
+use std::pin::Pin;
+#[cfg(feature = "stream")]
+use tokio::io::BufReader;
+#[cfg(feature = "stream")]
+use tokio_stream::Stream;
 
 /// Trait abstracting CLI execution. Mockable in tests.
 #[allow(async_fn_in_trait)]
@@ -69,7 +73,11 @@ impl ClaudeClient {
             runner: DefaultRunner,
         }
     }
+}
 
+#[cfg(feature = "stream")]
+#[cfg_attr(docsrs, doc(cfg(feature = "stream")))]
+impl ClaudeClient {
     /// Sends a prompt and returns a stream of events.
     ///
     /// Spawns the CLI with `--output-format stream-json` and streams events

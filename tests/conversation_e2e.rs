@@ -1,7 +1,9 @@
 //! E2E tests for Conversation API.
 //! Requires `claude` CLI in PATH. Run with `cargo test -- --ignored`.
 
-use claude_code_rs::{ClaudeClient, ClaudeConfig, StreamExt};
+#[cfg(feature = "stream")]
+use claude_code_rs::StreamExt;
+use claude_code_rs::{ClaudeClient, ClaudeConfig};
 
 #[tokio::test]
 #[ignore]
@@ -30,6 +32,7 @@ async fn conversation_two_turn_ask() {
     assert!(resp2.result.contains('4'));
 }
 
+#[cfg(feature = "stream")]
 #[tokio::test]
 #[ignore]
 async fn conversation_stream_then_ask() {

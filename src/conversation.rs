@@ -1,13 +1,16 @@
-use std::pin::Pin;
 use std::sync::{Arc, Mutex};
-
-use tokio_stream::Stream;
 
 use crate::client::{ClaudeClient, CommandRunner, DefaultRunner};
 use crate::config::{ClaudeConfig, ClaudeConfigBuilder};
 use crate::error::ClaudeError;
-use crate::stream::StreamEvent;
 use crate::types::ClaudeResponse;
+
+#[cfg(feature = "stream")]
+use crate::stream::StreamEvent;
+#[cfg(feature = "stream")]
+use std::pin::Pin;
+#[cfg(feature = "stream")]
+use tokio_stream::Stream;
 
 /// Stateful multi-turn conversation wrapper around [`ClaudeClient`].
 ///
@@ -105,6 +108,7 @@ impl<R: CommandRunner + Clone> Conversation<R> {
     }
 }
 
+#[cfg(feature = "stream")]
 /// Wraps a stream to transparently capture `session_id` from
 /// [`StreamEvent::SystemInit`] and [`StreamEvent::Result`].
 fn wrap_stream(
@@ -130,6 +134,8 @@ fn wrap_stream(
     })
 }
 
+#[cfg(feature = "stream")]
+#[cfg_attr(docsrs, doc(cfg(feature = "stream")))]
 impl Conversation {
     /// Sends a prompt and returns a stream of events.
     ///
@@ -333,8 +339,12 @@ mod tests {
         assert_eq!(args[idx + 1], "existing-sid");
     }
 
+    #[cfg(feature = "stream")]
+    use crate::stream::StreamEvent;
+    #[cfg(feature = "stream")]
     use crate::types::Usage;
 
+    #[cfg(feature = "stream")]
     #[tokio::test]
     async fn wrap_stream_captures_session_id_from_system_init() {
         let session_id: Arc<Mutex<Option<String>>> = Arc::new(Mutex::new(None));
@@ -363,6 +373,7 @@ mod tests {
         assert_eq!(count, 2);
     }
 
+    #[cfg(feature = "stream")]
     #[tokio::test]
     async fn wrap_stream_updates_session_id_from_result() {
         let session_id: Arc<Mutex<Option<String>>> =
