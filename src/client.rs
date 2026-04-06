@@ -106,8 +106,9 @@ impl ClaudeClient {
     /// Without it, only complete [`StreamEvent::AssistantText`] /
     /// [`StreamEvent::AssistantThinking`] messages are emitted.
     ///
-    /// Timeout is not applied to streams. Use [`tokio_stream::StreamExt::timeout()`]
-    /// if needed.
+    /// Use [`crate::ClaudeConfigBuilder::stream_idle_timeout`] to set an idle timeout.
+    /// If no event arrives within the specified duration, the stream yields
+    /// [`ClaudeError::Timeout`] and terminates.
     pub async fn ask_stream(
         &self,
         prompt: &str,
@@ -134,11 +135,31 @@ impl ClaudeClient {
         let reader = BufReader::new(stdout);
         let event_stream = parse_stream(reader);
         let mut guard = ChildGuard(Some(child));
+        let idle_timeout = self.config.stream_idle_timeout;
 
         Ok(Box::pin(async_stream::stream! {
             tokio::pin!(event_stream);
-            while let Some(event) = tokio_stream::StreamExt::next(&mut event_stream).await {
-                yield Ok(event);
+
+            loop {
+                let next = tokio_stream::StreamExt::next(&mut event_stream);
+                let maybe_event = if let Some(timeout_dur) = idle_timeout {
+                    match tokio::time::timeout(timeout_dur, next).await {
+                        Ok(Some(event)) => Some(event),
+                        Ok(None) => None,
+                        Err(_) => {
+                            trace_error!("stream idle timeout");
+                            yield Err(ClaudeError::Timeout);
+                            return;
+                        }
+                    }
+                } else {
+                    next.await
+                };
+
+                match maybe_event {
+                    Some(event) => yield Ok(event),
+                    None => break,
+                }
             }
 
             // Take child out of guard to wait for exit status.
