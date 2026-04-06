@@ -22,13 +22,14 @@ pub(crate) fn parse_event(line: &str) -> Vec<StreamEvent> {
         Some("user") => parse_user(&json),
         Some("rate_limit_event") => parse_rate_limit(&json),
         Some("result") => parse_result(&json),
-        _ => vec![],
+        Some("stream_event") => parse_stream_event(&json),
+        _ => vec![StreamEvent::Unknown(json)],
     }
 }
 
 fn parse_system(json: &Value) -> Vec<StreamEvent> {
     if json.get("subtype").and_then(|s| s.as_str()) != Some("init") {
-        return vec![];
+        return vec![StreamEvent::Unknown(json.clone())];
     }
     let session_id = json
         .get("session_id")
@@ -60,7 +61,7 @@ fn parse_assistant(json: &Value) -> Vec<StreamEvent> {
                         .and_then(|t| t.as_str())
                         .unwrap_or_default()
                         .to_string();
-                    Some(StreamEvent::Thinking(text))
+                    Some(StreamEvent::AssistantThinking(text))
                 }
                 Some("text") => {
                     let text = content
@@ -68,7 +69,7 @@ fn parse_assistant(json: &Value) -> Vec<StreamEvent> {
                         .and_then(|t| t.as_str())
                         .unwrap_or_default()
                         .to_string();
-                    Some(StreamEvent::Text(text))
+                    Some(StreamEvent::AssistantText(text))
                 }
                 Some("tool_use") => {
                     let id = content
@@ -130,6 +131,117 @@ fn parse_rate_limit(json: &Value) -> Vec<StreamEvent> {
     vec![StreamEvent::RateLimit { resets_at }]
 }
 
+fn parse_stream_event(json: &Value) -> Vec<StreamEvent> {
+    let event_type = json.pointer("/event/type").and_then(|t| t.as_str());
+    match event_type {
+        Some("content_block_delta") => parse_content_block_delta(json),
+        Some("message_start") => {
+            let model = json
+                .pointer("/event/message/model")
+                .and_then(|s| s.as_str())
+                .unwrap_or_default()
+                .to_string();
+            let id = json
+                .pointer("/event/message/id")
+                .and_then(|s| s.as_str())
+                .unwrap_or_default()
+                .to_string();
+            vec![StreamEvent::MessageStart { model, id }]
+        }
+        Some("content_block_start") => {
+            let index = json
+                .pointer("/event/index")
+                .and_then(|i| i.as_u64())
+                .unwrap_or(0);
+            let block_type = json
+                .pointer("/event/content_block/type")
+                .and_then(|s| s.as_str())
+                .unwrap_or_default()
+                .to_string();
+            vec![StreamEvent::ContentBlockStart { index, block_type }]
+        }
+        Some("content_block_stop") => {
+            let index = json
+                .pointer("/event/index")
+                .and_then(|i| i.as_u64())
+                .unwrap_or(0);
+            vec![StreamEvent::ContentBlockStop { index }]
+        }
+        Some("message_delta") => {
+            let stop_reason = json
+                .pointer("/event/delta/stop_reason")
+                .and_then(|s| s.as_str())
+                .map(|s| s.to_string());
+            vec![StreamEvent::MessageDelta { stop_reason }]
+        }
+        Some("message_stop") => vec![StreamEvent::MessageStop],
+        Some("ping") => vec![StreamEvent::Ping],
+        Some("error") => {
+            let error_type = json
+                .pointer("/event/error/type")
+                .and_then(|s| s.as_str())
+                .unwrap_or_default()
+                .to_string();
+            let message = json
+                .pointer("/event/error/message")
+                .and_then(|s| s.as_str())
+                .unwrap_or_default()
+                .to_string();
+            vec![StreamEvent::Error {
+                error_type,
+                message,
+            }]
+        }
+        _ => vec![StreamEvent::Unknown(json.clone())],
+    }
+}
+
+fn parse_content_block_delta(json: &Value) -> Vec<StreamEvent> {
+    let delta_type = json.pointer("/event/delta/type").and_then(|t| t.as_str());
+    match delta_type {
+        Some("text_delta") => {
+            let text = json
+                .pointer("/event/delta/text")
+                .and_then(|t| t.as_str())
+                .unwrap_or_default()
+                .to_string();
+            vec![StreamEvent::Text(text)]
+        }
+        Some("thinking_delta") => {
+            let thinking = json
+                .pointer("/event/delta/thinking")
+                .and_then(|t| t.as_str())
+                .unwrap_or_default()
+                .to_string();
+            vec![StreamEvent::Thinking(thinking)]
+        }
+        Some("input_json_delta") => {
+            let partial = json
+                .pointer("/event/delta/partial_json")
+                .and_then(|t| t.as_str())
+                .unwrap_or_default()
+                .to_string();
+            vec![StreamEvent::InputJsonDelta(partial)]
+        }
+        Some("signature_delta") => {
+            let sig = json
+                .pointer("/event/delta/signature")
+                .and_then(|t| t.as_str())
+                .unwrap_or_default()
+                .to_string();
+            vec![StreamEvent::SignatureDelta(sig)]
+        }
+        Some("citations_delta") => {
+            let citation = json
+                .pointer("/event/delta/citation")
+                .cloned()
+                .unwrap_or(Value::Null);
+            vec![StreamEvent::CitationsDelta(citation)]
+        }
+        _ => vec![StreamEvent::Unknown(json.clone())],
+    }
+}
+
 fn parse_result(json: &Value) -> Vec<StreamEvent> {
     match serde_json::from_value::<ClaudeResponse>(json.clone()) {
         Ok(resp) => vec![StreamEvent::Result(resp)],
@@ -172,27 +284,28 @@ mod tests {
     }
 
     #[test]
-    fn parse_system_non_init_skipped() {
+    fn parse_system_non_init_is_unknown() {
         let line = r#"{"type":"system","subtype":"hook_started"}"#;
         let events = parse_event(line);
-        assert!(events.is_empty());
+        assert_eq!(events.len(), 1);
+        assert!(matches!(&events[0], StreamEvent::Unknown(_)));
     }
 
     #[test]
-    fn parse_thinking() {
+    fn parse_assistant_thinking() {
         let line =
             r#"{"type":"assistant","message":{"content":[{"type":"thinking","thinking":"hmm"}]}}"#;
         let events = parse_event(line);
         assert_eq!(events.len(), 1);
-        assert!(matches!(&events[0], StreamEvent::Thinking(t) if t == "hmm"));
+        assert!(matches!(&events[0], StreamEvent::AssistantThinking(t) if t == "hmm"));
     }
 
     #[test]
-    fn parse_text() {
+    fn parse_assistant_text() {
         let line = r#"{"type":"assistant","message":{"content":[{"type":"text","text":"hello"}]}}"#;
         let events = parse_event(line);
         assert_eq!(events.len(), 1);
-        assert!(matches!(&events[0], StreamEvent::Text(t) if t == "hello"));
+        assert!(matches!(&events[0], StreamEvent::AssistantText(t) if t == "hello"));
     }
 
     #[test]
@@ -242,8 +355,125 @@ mod tests {
         let line = r#"{"type":"assistant","message":{"content":[{"type":"thinking","thinking":"hmm"},{"type":"text","text":"hello"}]}}"#;
         let events = parse_event(line);
         assert_eq!(events.len(), 2);
+        assert!(matches!(&events[0], StreamEvent::AssistantThinking(t) if t == "hmm"));
+        assert!(matches!(&events[1], StreamEvent::AssistantText(t) if t == "hello"));
+    }
+
+    #[test]
+    fn parse_stream_event_text_delta() {
+        let line = r#"{"type":"stream_event","event":{"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"hello"}}}"#;
+        let events = parse_event(line);
+        assert_eq!(events.len(), 1);
+        assert!(matches!(&events[0], StreamEvent::Text(t) if t == "hello"));
+    }
+
+    #[test]
+    fn parse_stream_event_thinking_delta() {
+        let line = r#"{"type":"stream_event","event":{"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":"hmm"}}}"#;
+        let events = parse_event(line);
+        assert_eq!(events.len(), 1);
         assert!(matches!(&events[0], StreamEvent::Thinking(t) if t == "hmm"));
-        assert!(matches!(&events[1], StreamEvent::Text(t) if t == "hello"));
+    }
+
+    #[test]
+    fn parse_stream_event_message_start() {
+        let line = r#"{"type":"stream_event","event":{"type":"message_start","message":{"id":"msg_01","model":"haiku","role":"assistant","content":[]}}}"#;
+        let events = parse_event(line);
+        assert_eq!(events.len(), 1);
+        assert!(matches!(&events[0], StreamEvent::MessageStart { model, id }
+            if model == "haiku" && id == "msg_01"));
+    }
+
+    #[test]
+    fn parse_stream_event_content_block_start() {
+        let line = r#"{"type":"stream_event","event":{"type":"content_block_start","index":0,"content_block":{"type":"thinking","thinking":""}}}"#;
+        let events = parse_event(line);
+        assert_eq!(events.len(), 1);
+        assert!(
+            matches!(&events[0], StreamEvent::ContentBlockStart { index: 0, block_type }
+            if block_type == "thinking")
+        );
+    }
+
+    #[test]
+    fn parse_stream_event_content_block_stop() {
+        let line = r#"{"type":"stream_event","event":{"type":"content_block_stop","index":1}}"#;
+        let events = parse_event(line);
+        assert_eq!(events.len(), 1);
+        assert!(matches!(
+            &events[0],
+            StreamEvent::ContentBlockStop { index: 1 }
+        ));
+    }
+
+    #[test]
+    fn parse_stream_event_message_delta() {
+        let line = r#"{"type":"stream_event","event":{"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"output_tokens":50}}}"#;
+        let events = parse_event(line);
+        assert_eq!(events.len(), 1);
+        assert!(
+            matches!(&events[0], StreamEvent::MessageDelta { stop_reason }
+            if stop_reason.as_deref() == Some("end_turn"))
+        );
+    }
+
+    #[test]
+    fn parse_stream_event_message_stop() {
+        let line = r#"{"type":"stream_event","event":{"type":"message_stop"}}"#;
+        let events = parse_event(line);
+        assert_eq!(events.len(), 1);
+        assert!(matches!(&events[0], StreamEvent::MessageStop));
+    }
+
+    #[test]
+    fn parse_stream_event_ping() {
+        let line = r#"{"type":"stream_event","event":{"type":"ping"}}"#;
+        let events = parse_event(line);
+        assert_eq!(events.len(), 1);
+        assert!(matches!(&events[0], StreamEvent::Ping));
+    }
+
+    #[test]
+    fn parse_stream_event_error() {
+        let line = r#"{"type":"stream_event","event":{"type":"error","error":{"type":"overloaded_error","message":"Overloaded"}}}"#;
+        let events = parse_event(line);
+        assert_eq!(events.len(), 1);
+        assert!(
+            matches!(&events[0], StreamEvent::Error { error_type, message }
+            if error_type == "overloaded_error" && message == "Overloaded")
+        );
+    }
+
+    #[test]
+    fn parse_stream_event_input_json_delta() {
+        let line = r#"{"type":"stream_event","event":{"type":"content_block_delta","index":0,"delta":{"type":"input_json_delta","partial_json":"\"path\":"}}}"#;
+        let events = parse_event(line);
+        assert_eq!(events.len(), 1);
+        assert!(matches!(&events[0], StreamEvent::InputJsonDelta(s) if s == "\"path\":"));
+    }
+
+    #[test]
+    fn parse_stream_event_signature_delta() {
+        let line = r#"{"type":"stream_event","event":{"type":"content_block_delta","index":0,"delta":{"type":"signature_delta","signature":"abc123"}}}"#;
+        let events = parse_event(line);
+        assert_eq!(events.len(), 1);
+        assert!(matches!(&events[0], StreamEvent::SignatureDelta(s) if s == "abc123"));
+    }
+
+    #[test]
+    fn parse_stream_event_citations_delta() {
+        let line = r#"{"type":"stream_event","event":{"type":"content_block_delta","index":0,"delta":{"type":"citations_delta","citation":{"url":"https://example.com"}}}}"#;
+        let events = parse_event(line);
+        assert_eq!(events.len(), 1);
+        assert!(matches!(&events[0], StreamEvent::CitationsDelta(_)));
+    }
+
+    #[test]
+    fn parse_unknown_type_preserved() {
+        let line = r#"{"type":"future_event","data":"something"}"#;
+        let events = parse_event(line);
+        assert_eq!(events.len(), 1);
+        assert!(matches!(&events[0], StreamEvent::Unknown(v) if v["type"] == "future_event"));
     }
 
     #[test]
@@ -251,7 +481,7 @@ mod tests {
         let line = "\x1b[?1004l{\"type\":\"assistant\",\"message\":{\"content\":[{\"type\":\"text\",\"text\":\"hi\"}]}}";
         let events = parse_event(line);
         assert_eq!(events.len(), 1);
-        assert!(matches!(&events[0], StreamEvent::Text(t) if t == "hi"));
+        assert!(matches!(&events[0], StreamEvent::AssistantText(t) if t == "hi"));
     }
 
     #[test]
@@ -274,13 +504,13 @@ mod tests {
         let event = stream.next().await.unwrap();
         assert!(matches!(event, StreamEvent::SystemInit { .. }));
 
-        // 2nd event: Thinking
+        // 2nd event: AssistantThinking (from assistant event)
         let event = stream.next().await.unwrap();
-        assert!(matches!(event, StreamEvent::Thinking(_)));
+        assert!(matches!(event, StreamEvent::AssistantThinking(_)));
 
-        // 3rd event: Text
+        // 3rd event: AssistantText (from assistant event)
         let event = stream.next().await.unwrap();
-        assert!(matches!(event, StreamEvent::Text(ref t) if t == "Hello!"));
+        assert!(matches!(event, StreamEvent::AssistantText(ref t) if t == "Hello!"));
 
         // 4th event: Result
         let event = stream.next().await.unwrap();
@@ -297,7 +527,7 @@ mod tests {
         let mut stream = parse_stream(reader);
 
         let event = stream.next().await.unwrap();
-        assert!(matches!(event, StreamEvent::Text(ref t) if t == "ok"));
+        assert!(matches!(event, StreamEvent::AssistantText(ref t) if t == "ok"));
 
         assert!(stream.next().await.is_none());
     }

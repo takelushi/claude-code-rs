@@ -37,7 +37,7 @@ async fn e2e_ask_stream_with_haiku() {
 
     while let Some(event) = stream.next().await {
         match event.unwrap() {
-            StreamEvent::Text(_) => got_text = true,
+            StreamEvent::Text(_) | StreamEvent::AssistantText(_) => got_text = true,
             StreamEvent::Result(resp) => {
                 assert!(!resp.is_error);
                 assert!(!resp.result.is_empty());

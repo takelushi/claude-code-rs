@@ -37,6 +37,18 @@ pub struct Usage {
 }
 
 /// Event emitted from a stream-json response.
+///
+/// Events come from two sources:
+///
+/// - **Delta variants** ([`Text`](Self::Text), [`Thinking`](Self::Thinking), etc.) — real-time
+///   token-level chunks from `stream_event`. Requires
+///   [`ClaudeConfigBuilder::include_partial_messages`] to be enabled.
+/// - **Assistant variants** ([`AssistantText`](Self::AssistantText),
+///   [`AssistantThinking`](Self::AssistantThinking)) — complete messages from `assistant` events.
+///   Always sent regardless of `include_partial_messages`.
+///
+/// When `include_partial_messages` is enabled, both delta and assistant variants are emitted.
+/// Use delta variants for real-time display and assistant variants for the final complete text.
 #[derive(Debug, Clone)]
 #[non_exhaustive]
 pub enum StreamEvent {
@@ -47,10 +59,18 @@ pub enum StreamEvent {
         /// Model name.
         model: String,
     },
-    /// Model's thinking process (extended thinking).
+    /// Thinking delta chunk from real-time streaming (`stream_event` / `thinking_delta`).
+    ///
+    /// Only emitted when [`ClaudeConfigBuilder::include_partial_messages`] is enabled.
     Thinking(String),
-    /// Text response chunk.
+    /// Text delta chunk from real-time streaming (`stream_event` / `text_delta`).
+    ///
+    /// Only emitted when [`ClaudeConfigBuilder::include_partial_messages`] is enabled.
     Text(String),
+    /// Complete thinking text from `assistant` event. Always emitted.
+    AssistantThinking(String),
+    /// Complete text from `assistant` event. Always emitted.
+    AssistantText(String),
     /// Tool invocation by the model.
     ToolUse {
         /// Tool use ID.
@@ -72,8 +92,51 @@ pub enum StreamEvent {
         /// Timestamp when the rate limit resets.
         resets_at: u64,
     },
+    /// Partial tool input JSON chunk (from `input_json_delta`).
+    InputJsonDelta(String),
+    /// Thinking signature chunk (from `signature_delta`).
+    SignatureDelta(String),
+    /// Citations chunk (from `citations_delta`).
+    CitationsDelta(serde_json::Value),
+    /// Start of a message (from `message_start`).
+    MessageStart {
+        /// Model name.
+        model: String,
+        /// Message ID.
+        id: String,
+    },
+    /// Start of a content block (from `content_block_start`).
+    ContentBlockStart {
+        /// Block index.
+        index: u64,
+        /// Block type (`"text"`, `"thinking"`, `"tool_use"`, etc.).
+        block_type: String,
+    },
+    /// End of a content block (from `content_block_stop`).
+    ContentBlockStop {
+        /// Block index.
+        index: u64,
+    },
+    /// Message-level delta with stop reason (from `message_delta`).
+    MessageDelta {
+        /// Why the message stopped.
+        stop_reason: Option<String>,
+    },
+    /// Message complete (from `message_stop`).
+    MessageStop,
+    /// Keepalive ping (from `ping`).
+    Ping,
+    /// API error event (from `error`).
+    Error {
+        /// Error type.
+        error_type: String,
+        /// Error message.
+        message: String,
+    },
     /// Final result (same structure as non-streaming response).
     Result(ClaudeResponse),
+    /// Unrecognized event (raw JSON preserved so nothing is lost).
+    Unknown(serde_json::Value),
 }
 
 /// Strips ANSI escape sequences from stdout and extracts the JSON portion.
