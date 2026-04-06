@@ -50,7 +50,7 @@ cargo run --example structured_output # 構造化出力
 ```plain
 src/
   lib.rs           # pub API re-export
-  client.rs        # ClaudeClient (CLI実行の中核: ask, ask_structured, ask_stream)
+  client.rs        # ClaudeClient (CLI実行の中核: ask, ask_structured, ask_stream), check_cli
   config.rs        # ClaudeConfig (--model, --system-prompt 等のオプション)
   conversation.rs  # Conversation (session_id 自動管理の複数ターン会話)
   types.rs         # ClaudeResponse (parse_result 含む), Usage 等のコア型定義
