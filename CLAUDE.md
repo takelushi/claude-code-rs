@@ -1,68 +1,69 @@
-# claude-code-rs
+# claude-code
 
-Claude Code CLI をRustから実行するためのライブラリ。
+A Rust library for executing Claude Code CLI as a subprocess.
 
 ## Project Overview
 
-- `claude` CLI の `--print` モードをサブプロセスとして実行し、結果を型安全に扱う
-- 出力フォーマット: `--output-format json` (単発) / `--output-format stream-json` (ストリーミング)
-- ライセンス: MIT
-- crates.io への publish は現状検討しない
+- Runs `claude` CLI in `--print` mode as a subprocess and handles results in a type-safe manner
+- Output formats: `--output-format json` (single-shot) / `--output-format stream-json` (streaming)
+- License: MIT
+- Published on crates.io as `claude-code`
 
 ## Tech Stack
 
 - Rust 1.93+ (edition 2024)
-- 非同期ランタイム: tokio
-- シリアライズ: serde / serde_json
-- プロセス実行: tokio::process
-- ストリーミング: tokio-stream / async-stream
-- エラー処理: thiserror
-- テスト: cargo test + mockall 0.14
+- Async runtime: tokio
+- Serialization: serde / serde_json
+- Process execution: tokio::process
+- Streaming: tokio-stream / async-stream
+- Error handling: thiserror
+- Testing: cargo test + mockall 0.14
 
 ## Development
 
 ### Commands
 
 ```sh
-cargo build                    # ビルド
-cargo test                     # テスト実行
-cargo test -- --ignored        # E2E テスト実行
-cargo clippy                   # lint
-cargo fmt --check              # フォーマットチェック
-cargo fmt                      # フォーマット適用
-cargo doc --open               # ドキュメント生成
-cargo run --example simple            # 動作確認
-cargo run --example stream            # ストリーミング動作確認
-cargo run --example stream-all        # 全イベント表示
-cargo run --example multi_turn        # 複数ターン会話
-cargo run --example structured_output # 構造化出力
+cargo build                    # Build
+cargo test                     # Run tests
+cargo test -- --ignored        # Run E2E tests
+cargo clippy                   # Lint
+cargo fmt --check              # Check formatting
+cargo fmt                      # Apply formatting
+cargo doc --open               # Generate docs
+cargo publish --dry-run        # Verify publishability
+cargo run --example simple            # Basic usage
+cargo run --example stream            # Streaming usage
+cargo run --example stream-all        # All stream events
+cargo run --example multi_turn        # Multi-turn conversation
+cargo run --example structured_output # Structured output
 ```
 
 ### Workflow
 
 - TDD (Explore -> Red -> Green -> Refactor)
-- `cargo clippy -- -D warnings` を通すこと
-- `cargo fmt` を適用してからコミット
-- pub API には doc comment を書く
+- Must pass `cargo clippy -- -D warnings`
+- Apply `cargo fmt` before committing
+- Write doc comments for all pub API items
 
 ### Architecture
 
 ```plain
 src/
   lib.rs           # pub API re-export
-  client.rs        # ClaudeClient (CLI実行の中核: ask, ask_structured, ask_stream), check_cli
-  config.rs        # ClaudeConfig (--model, --system-prompt 等のオプション)
-  conversation.rs  # Conversation (session_id 自動管理の複数ターン会話)
-  types.rs         # ClaudeResponse (parse_result 含む), Usage 等のコア型定義
-  error.rs         # エラー型
-  stream.rs        # StreamEvent + stream-json のパース・イテレーション・バッファリング
-  structured.rs    # generate_schema: JsonSchema → JSON Schema 文字列生成 (structured feature)
+  client.rs        # ClaudeClient (core CLI execution: ask, ask_structured, ask_stream), check_cli
+  config.rs        # ClaudeConfig (--model, --system-prompt, and other options)
+  conversation.rs  # Conversation (automatic session_id management for multi-turn)
+  types.rs         # ClaudeResponse (including parse_result), Usage, and other core types
+  error.rs         # Error types
+  stream.rs        # StreamEvent + stream-json parsing, iteration, and buffering
+  structured.rs    # generate_schema: JsonSchema → JSON Schema string generation (structured feature)
 examples/
-  simple.rs        # 最小限の動作確認用サンプル
-  stream.rs        # ストリーミング動作確認用サンプル
-  stream-all.rs         # 全イベント表示サンプル
-  multi_turn.rs         # 複数ターン会話サンプル
-  structured_output.rs  # 構造化出力サンプル
+  simple.rs        # Minimal usage example
+  stream.rs        # Streaming usage example
+  stream-all.rs    # All stream events example
+  multi_turn.rs    # Multi-turn conversation example
+  structured_output.rs  # Structured output example
 ```
 
 ### Feature Flags
@@ -75,47 +76,48 @@ structured = ["dep:schemars"]                       # generate_schema helper
 tracing = ["dep:tracing"]                           # debug/error/info logging in client.rs
 ```
 
-- `default-features = false` で最小構成（`ask()` / `ask_structured()` のみ）
-- `StreamEvent` は `stream.rs` モジュール内に定義（`stream` feature でゲート）
-- tracing は `client.rs` 内の条件付きマクロ（`trace_debug!` 等）で吸収
+- `default-features = false` for minimal build (`ask()` / `ask_structured()` only)
+- `StreamEvent` is defined in the `stream.rs` module (gated by `stream` feature)
+- tracing is absorbed via conditional macros (`trace_debug!` etc.) in `client.rs`
 
 ### Error Variants
 
-`ClaudeError` で想定するバリアント:
+`ClaudeError` variants:
 
-- `CliNotFound` — `claude` コマンドが PATH に見つからない
-- `NonZeroExit { code, stderr }` — CLI が非ゼロ終了コードを返した
-- `ParseError` — JSON / stream-json レスポンスのデシリアライズ失敗
-- `Timeout` — 指定時間内に応答が返らなかった
-- `Io` — プロセス起動・stdout/stderr 読み取り等の I/O エラー
-- `StructuredOutputError { raw_result, source }` — CLI は成功したが result の JSON デシリアライズに失敗した
+- `CliNotFound` — `claude` command not found in PATH
+- `NonZeroExit { code, stderr }` — CLI returned a non-zero exit code
+- `ParseError` — Failed to deserialize JSON / stream-json response
+- `Timeout` — No response within the specified duration
+- `Io` — I/O error from process spawn, stdout/stderr reads, etc.
+- `StructuredOutputError { raw_result, source }` — CLI succeeded but JSON deserialization of result failed
 
 ### Testing Strategy
 
-- CLI 実行を `CommandRunner` trait で抽象化し、mockall でモックする
-- `tests/fixtures/` に CLI の stdout を再現した JSON ファイルを配置
-- ユニットテスト: モック + fixture でCLIを呼ばずに各モジュールを単体テスト
-- 結合テスト / E2E: 実際に `claude` CLI を `--model haiku` で実行し、課金を最小化する
-- E2E テストは `#[ignore]` を付与し、`cargo test -- --ignored` で明示的に実行する
+- CLI execution is abstracted via the `CommandRunner` trait and mocked with mockall
+- `tests/fixtures/` contains JSON files reproducing CLI stdout
+- Unit tests: use mocks + fixtures to test each module without calling the CLI
+- Integration / E2E: run the actual `claude` CLI with `--model haiku` to minimize costs
+- E2E tests are marked with `#[ignore]` and run explicitly via `cargo test -- --ignored`
 
 ### Documentation Policy
 
-- バグや設計ミスを修正したら、再発防止策を本ファイルの Conventions に追記する
-- 新しいモジュールや外部仕様を発見したら `docs/` に記録する
-- Architecture のファイル構成が変わったら本ファイルを更新する
-- 実装中に判明した Claude CLI の挙動・制約は `docs/claude-cli.md` に記録する
+- All documentation (CLAUDE.md, docs/, README, etc.) must be written in English
+- All code comments and doc comments must be written in English
+- When fixing bugs or design mistakes, add prevention measures to the Conventions section
+- Record newly discovered modules or external specs in `docs/`
+- Update this file when the Architecture file structure changes
+- Record observed Claude CLI behaviors and constraints in `docs/claude-cli.md`
 
 ### Conventions
 
-- エラーは `thiserror` で定義し、`Result<T, ClaudeError>` を返す
-- Builder パターンで `ClaudeConfig` を構築
-- 非同期 API を基本とし、同期ラッパーは提供しない
-- `#[must_use]`, `#[non_exhaustive]` を適切に使う
-- テストでは実際の `claude` CLI を呼ばない (モック or fixture)
-- `mockall` の `returning` は async クロージャ非対応。非同期の遅延が必要なテスト（timeout 等）は手動で trait 実装した struct を使う
-- `MockCommandRunner` は `Clone` 未対応。`Conversation` のように runner を clone するコンポーネントのテストには、手動で trait 実装した `RecordingRunner`（`Arc<Mutex>` で状態共有）を使う
-- `CommandRunner::run()` は完了済みの `Output` を返すため、ストリーミングを抽象化できない。`ask_stream` は常に実プロセスを起動する `DefaultRunner` 限定
-- `CommandRunner` trait に `#[allow(async_fn_in_trait)]` を付与する（ライブラリ内部用のため `Send` 境界の警告を抑制）
-- コードコメント・doc comment は英語で書く
-- CLI オプションの値制限（`effort`, `permission_mode` 等）は enum ではなく `String` + 定数モジュールで表現する。Claude Code CLI は活発に開発されており、enum では新しい値の追加のたびにライブラリリリースが必要になるため
-- ライブラリはオプション間の排他チェック・バリデーションを行わない。バリデーションの責務は CLI コマンド側にある
+- Define errors with `thiserror` and return `Result<T, ClaudeError>`
+- Build `ClaudeConfig` using the builder pattern
+- Async API only; no synchronous wrappers
+- Use `#[must_use]` and `#[non_exhaustive]` appropriately
+- Tests must not call the actual `claude` CLI (use mocks or fixtures)
+- `mockall`'s `returning` does not support async closures; for tests requiring async delays (e.g., timeout), manually implement the trait on a struct
+- `MockCommandRunner` does not support `Clone`; for components that clone the runner (e.g., `Conversation`), use a manually implemented `RecordingRunner` with `Arc<Mutex>` for shared state
+- `CommandRunner::run()` returns a completed `Output`, so it cannot abstract streaming; `ask_stream` is limited to `DefaultRunner` which always spawns a real process
+- `CommandRunner` trait uses `#[allow(async_fn_in_trait)]` to suppress `Send` bound warnings (internal use only)
+- CLI option value constraints (`effort`, `permission_mode`, etc.) use `String` + constant modules instead of enums. Claude Code CLI is actively developed, and enums would require a library release for each new value
+- The library does not perform mutual exclusion checks or validation between options. Validation is the responsibility of the CLI command
