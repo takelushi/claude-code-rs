@@ -7,6 +7,7 @@ Claude Code CLI をRustから実行するためのライブラリ。
 - `claude` CLI の `--print` モードをサブプロセスとして実行し、結果を型安全に扱う
 - 出力フォーマット: `--output-format json` (単発) / `--output-format stream-json` (ストリーミング)
 - ライセンス: MIT
+- crates.io への publish は現状検討しない
 
 ## Tech Stack
 
