@@ -73,34 +73,138 @@ impl ClaudeConfig {
 
     /// Builds common CLI arguments shared by JSON and stream-json modes.
     fn base_args(&self) -> Vec<String> {
-        let mut args = vec![
-            "--print".into(),
-            "--no-session-persistence".into(),
-            "--setting-sources".into(),
-            String::new(),
-            "--strict-mcp-config".into(),
-            "--mcp-config".into(),
-            r#"{"mcpServers":{}}"#.into(),
-            "--tools".into(),
-            String::new(),
-            "--disable-slash-commands".into(),
-            "--system-prompt".into(),
-        ];
+        let mut args = vec!["--print".into()];
 
-        match &self.system_prompt {
-            Some(sp) => args.push(sp.clone()),
-            None => args.push(String::new()),
+        // --- Context minimization defaults (overridable) ---
+
+        // no_session_persistence: None → enabled, Some(false) → disabled
+        if self.no_session_persistence != Some(false) {
+            args.push("--no-session-persistence".into());
         }
 
-        if let Some(model) = &self.model {
+        // setting_sources: None → "" (minimal), Some(val) → val
+        args.push("--setting-sources".into());
+        args.push(self.setting_sources.clone().unwrap_or_default());
+
+        // strict_mcp_config: None → enabled, Some(false) → disabled
+        if self.strict_mcp_config != Some(false) {
+            args.push("--strict-mcp-config".into());
+        }
+
+        // mcp_config: [] → '{"mcpServers":{}}' (minimal), non-empty → user values
+        if self.mcp_config.is_empty() {
+            args.push("--mcp-config".into());
+            args.push(r#"{"mcpServers":{}}"#.into());
+        } else {
+            for cfg in &self.mcp_config {
+                args.push("--mcp-config".into());
+                args.push(cfg.clone());
+            }
+        }
+
+        // tools: None → "" (minimal), Some(val) → val
+        args.push("--tools".into());
+        args.push(self.tools.clone().unwrap_or_default());
+
+        // disable_slash_commands: None → enabled, Some(false) → disabled
+        if self.disable_slash_commands != Some(false) {
+            args.push("--disable-slash-commands".into());
+        }
+
+        // --- Standard options ---
+
+        args.push("--system-prompt".into());
+        args.push(self.system_prompt.clone().unwrap_or_default());
+
+        if let Some(ref val) = self.append_system_prompt {
+            args.push("--append-system-prompt".into());
+            args.push(val.clone());
+        }
+
+        if let Some(ref val) = self.model {
             args.push("--model".into());
-            args.push(model.clone());
+            args.push(val.clone());
+        }
+
+        if let Some(ref val) = self.fallback_model {
+            args.push("--fallback-model".into());
+            args.push(val.clone());
+        }
+
+        if let Some(ref val) = self.effort {
+            args.push("--effort".into());
+            args.push(val.clone());
         }
 
         if let Some(max_turns) = self.max_turns {
             args.push("--max-turns".into());
             args.push(max_turns.to_string());
         }
+
+        if let Some(budget) = self.max_budget_usd {
+            args.push("--max-budget-usd".into());
+            args.push(budget.to_string());
+        }
+
+        if !self.allowed_tools.is_empty() {
+            args.push("--allowedTools".into());
+            args.extend(self.allowed_tools.iter().cloned());
+        }
+
+        if !self.disallowed_tools.is_empty() {
+            args.push("--disallowedTools".into());
+            args.extend(self.disallowed_tools.iter().cloned());
+        }
+
+        if let Some(ref val) = self.settings {
+            args.push("--settings".into());
+            args.push(val.clone());
+        }
+
+        if let Some(ref val) = self.json_schema {
+            args.push("--json-schema".into());
+            args.push(val.clone());
+        }
+
+        if self.include_hook_events == Some(true) {
+            args.push("--include-hook-events".into());
+        }
+
+        if let Some(ref val) = self.permission_mode {
+            args.push("--permission-mode".into());
+            args.push(val.clone());
+        }
+
+        if self.dangerously_skip_permissions == Some(true) {
+            args.push("--dangerously-skip-permissions".into());
+        }
+
+        if !self.add_dir.is_empty() {
+            args.push("--add-dir".into());
+            args.extend(self.add_dir.iter().cloned());
+        }
+
+        if !self.file.is_empty() {
+            args.push("--file".into());
+            args.extend(self.file.iter().cloned());
+        }
+
+        if let Some(ref val) = self.resume {
+            args.push("--resume".into());
+            args.push(val.clone());
+        }
+
+        if let Some(ref val) = self.session_id {
+            args.push("--session-id".into());
+            args.push(val.clone());
+        }
+
+        if self.bare == Some(true) {
+            args.push("--bare".into());
+        }
+
+        // extra_args: appended before prompt
+        args.extend(self.extra_args.iter().cloned());
 
         args
     }
@@ -633,5 +737,196 @@ mod tests {
         assert_eq!(config.disable_slash_commands, Some(false));
         assert_eq!(config.strict_mcp_config, Some(false));
         assert_eq!(config.extra_args, vec!["--custom", "val"]);
+    }
+
+    #[test]
+    fn default_uses_minimal_context() {
+        let config = ClaudeConfig::default();
+        let args = config.to_args("test");
+
+        assert!(args.contains(&"--no-session-persistence".to_string()));
+        assert!(args.contains(&"--strict-mcp-config".to_string()));
+        assert!(args.contains(&"--disable-slash-commands".to_string()));
+
+        let ss_idx = args.iter().position(|a| a == "--setting-sources").unwrap();
+        assert_eq!(args[ss_idx + 1], "");
+
+        let mcp_idx = args.iter().position(|a| a == "--mcp-config").unwrap();
+        assert_eq!(args[mcp_idx + 1], r#"{"mcpServers":{}}"#);
+
+        let tools_idx = args.iter().position(|a| a == "--tools").unwrap();
+        assert_eq!(args[tools_idx + 1], "");
+    }
+
+    #[test]
+    fn override_no_session_persistence_false() {
+        let config = ClaudeConfig::builder()
+            .no_session_persistence(false)
+            .build();
+        let args = config.to_args("test");
+        assert!(!args.contains(&"--no-session-persistence".to_string()));
+    }
+
+    #[test]
+    fn override_strict_mcp_config_false() {
+        let config = ClaudeConfig::builder().strict_mcp_config(false).build();
+        let args = config.to_args("test");
+        assert!(!args.contains(&"--strict-mcp-config".to_string()));
+    }
+
+    #[test]
+    fn override_disable_slash_commands_false() {
+        let config = ClaudeConfig::builder()
+            .disable_slash_commands(false)
+            .build();
+        let args = config.to_args("test");
+        assert!(!args.contains(&"--disable-slash-commands".to_string()));
+    }
+
+    #[test]
+    fn override_tools() {
+        let config = ClaudeConfig::builder().tools("Bash,Edit").build();
+        let args = config.to_args("test");
+        let idx = args.iter().position(|a| a == "--tools").unwrap();
+        assert_eq!(args[idx + 1], "Bash,Edit");
+    }
+
+    #[test]
+    fn override_setting_sources() {
+        let config = ClaudeConfig::builder()
+            .setting_sources("user,project")
+            .build();
+        let args = config.to_args("test");
+        let idx = args.iter().position(|a| a == "--setting-sources").unwrap();
+        assert_eq!(args[idx + 1], "user,project");
+    }
+
+    #[test]
+    fn override_mcp_config() {
+        let config = ClaudeConfig::builder()
+            .mcp_configs(["path/config.json"])
+            .build();
+        let args = config.to_args("test");
+        let idx = args.iter().position(|a| a == "--mcp-config").unwrap();
+        assert_eq!(args[idx + 1], "path/config.json");
+        assert!(!args.contains(&r#"{"mcpServers":{}}"#.to_string()));
+    }
+
+    #[test]
+    fn effort_with_constant() {
+        let config = ClaudeConfig::builder().effort(effort::HIGH).build();
+        let args = config.to_args("test");
+        let idx = args.iter().position(|a| a == "--effort").unwrap();
+        assert_eq!(args[idx + 1], "high");
+    }
+
+    #[test]
+    fn effort_with_custom_string() {
+        let config = ClaudeConfig::builder().effort("ultra").build();
+        let args = config.to_args("test");
+        let idx = args.iter().position(|a| a == "--effort").unwrap();
+        assert_eq!(args[idx + 1], "ultra");
+    }
+
+    #[test]
+    fn allowed_tools_multiple() {
+        let config = ClaudeConfig::builder()
+            .allowed_tools(["Bash(git:*)", "Edit", "Read"])
+            .build();
+        let args = config.to_args("test");
+        let idx = args.iter().position(|a| a == "--allowedTools").unwrap();
+        assert_eq!(args[idx + 1], "Bash(git:*)");
+        assert_eq!(args[idx + 2], "Edit");
+        assert_eq!(args[idx + 3], "Read");
+    }
+
+    #[test]
+    fn bare_flag() {
+        let config = ClaudeConfig::builder().bare(true).build();
+        let args = config.to_args("test");
+        assert!(args.contains(&"--bare".to_string()));
+    }
+
+    #[test]
+    fn dangerously_skip_permissions_flag() {
+        let config = ClaudeConfig::builder()
+            .dangerously_skip_permissions(true)
+            .build();
+        let args = config.to_args("test");
+        assert!(args.contains(&"--dangerously-skip-permissions".to_string()));
+    }
+
+    #[test]
+    fn resume_session() {
+        let config = ClaudeConfig::builder().resume("session-abc").build();
+        let args = config.to_args("test");
+        let idx = args.iter().position(|a| a == "--resume").unwrap();
+        assert_eq!(args[idx + 1], "session-abc");
+    }
+
+    #[test]
+    fn session_id_field() {
+        let config = ClaudeConfig::builder()
+            .session_id("550e8400-e29b-41d4-a716-446655440000")
+            .build();
+        let args = config.to_args("test");
+        let idx = args.iter().position(|a| a == "--session-id").unwrap();
+        assert_eq!(args[idx + 1], "550e8400-e29b-41d4-a716-446655440000");
+    }
+
+    #[test]
+    fn json_schema_field() {
+        let schema = r#"{"type":"object","properties":{"name":{"type":"string"}}}"#;
+        let config = ClaudeConfig::builder().json_schema(schema).build();
+        let args = config.to_args("test");
+        let idx = args.iter().position(|a| a == "--json-schema").unwrap();
+        assert_eq!(args[idx + 1], schema);
+    }
+
+    #[test]
+    fn add_dir_multiple() {
+        let config = ClaudeConfig::builder()
+            .add_dirs(["/path/a", "/path/b"])
+            .build();
+        let args = config.to_args("test");
+        let idx = args.iter().position(|a| a == "--add-dir").unwrap();
+        assert_eq!(args[idx + 1], "/path/a");
+        assert_eq!(args[idx + 2], "/path/b");
+    }
+
+    #[test]
+    fn file_multiple() {
+        let config = ClaudeConfig::builder()
+            .files(["file_abc:doc.txt", "file_def:img.png"])
+            .build();
+        let args = config.to_args("test");
+        let idx = args.iter().position(|a| a == "--file").unwrap();
+        assert_eq!(args[idx + 1], "file_abc:doc.txt");
+        assert_eq!(args[idx + 2], "file_def:img.png");
+    }
+
+    #[test]
+    fn extra_args_before_prompt() {
+        let config = ClaudeConfig::builder()
+            .extra_args(["--custom-flag", "value"])
+            .build();
+        let args = config.to_args("my prompt");
+        let custom_idx = args.iter().position(|a| a == "--custom-flag").unwrap();
+        let prompt_idx = args.iter().position(|a| a == "my prompt").unwrap();
+        assert!(custom_idx < prompt_idx);
+        assert_eq!(args[custom_idx + 1], "value");
+    }
+
+    #[test]
+    fn extra_args_with_typed_fields() {
+        let config = ClaudeConfig::builder()
+            .model("sonnet")
+            .extra_args(["--custom", "val"])
+            .build();
+        let args = config.to_args("test");
+        assert!(args.contains(&"--model".to_string()));
+        assert!(args.contains(&"sonnet".to_string()));
+        assert!(args.contains(&"--custom".to_string()));
+        assert!(args.contains(&"val".to_string()));
     }
 }
