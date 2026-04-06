@@ -1,13 +1,11 @@
 [package]
-name = "claude-code-rs"
+name = "claude-code"
 version = "0.1.0"
 edition = "2024"
 rust-version = "1.93"
 license = "MIT"
 description = "A Rust library for executing Claude Code CLI"
 repository = "https://github.com/takelushi/claude-code-rs"
-homepage = "https://github.com/takelushi/claude-code-rs"
-documentation = "https://docs.rs/claude-code-rs"
 readme = "README.md"
 keywords = ["claude", "anthropic", "cli", "ai", "llm"]
 categories = ["api-bindings", "asynchronous"]
