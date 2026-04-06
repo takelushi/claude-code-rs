@@ -85,6 +85,26 @@ pub use structured::generate_schema;
 pub use types::{ClaudeResponse, Usage};
 ```
 
+### docs.rs 対応
+
+feature-gated なアイテムに `#[cfg_attr(docsrs, doc(cfg(...)))]` を付与し、docs.rs 上でどの feature が必要か表示する。
+
+```rust
+#[cfg(feature = "stream")]
+#[cfg_attr(docsrs, doc(cfg(feature = "stream")))]
+pub use stream::StreamEvent;
+```
+
+`Cargo.toml` に docs.rs 用のメタデータを追加：
+
+```toml
+[package.metadata.docs.rs]
+all-features = true
+rustdoc-args = ["--cfg", "docsrs"]
+```
+
+対象：`StreamEvent`, `StreamExt`, `generate_schema`, feature-gated な `impl` ブロック内のメソッド（`ask_stream` 等）。
+
 ### StreamEvent の移動
 
 `types.rs` から `stream.rs` に `StreamEvent` enum を移動する。`stream.rs` は `StreamEvent` 定義 + パーサー（`parse_event`, `parse_stream`）をまとめて持つ。
