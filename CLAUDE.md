@@ -50,9 +50,9 @@ src/
   client.rs        # ClaudeClient (CLI実行の中核)
   config.rs        # ClaudeConfig (--model, --system-prompt 等のオプション)
   conversation.rs  # Conversation (session_id 自動管理の複数ターン会話)
-  types.rs         # JSON/stream-json 両方の型定義のみ
+  types.rs         # ClaudeResponse, Usage 等のコア型定義
   error.rs         # エラー型
-  stream.rs        # stream-json のパース・イテレーション・バッファリング
+  stream.rs        # StreamEvent + stream-json のパース・イテレーション・バッファリング
   structured.rs    # generate_schema (structured feature gated)
 examples/
   simple.rs        # 最小限の動作確認用サンプル
@@ -60,6 +60,20 @@ examples/
   stream-all.rs    # 全イベント表示サンプル
   multi_turn.rs    # 複数ターン会話サンプル
 ```
+
+### Feature Flags
+
+```toml
+[features]
+default = ["stream", "structured", "tracing"]
+stream = ["dep:tokio-stream", "dep:async-stream"]  # ask_stream, StreamEvent, Conversation stream methods
+structured = ["dep:schemars"]                       # generate_schema helper
+tracing = ["dep:tracing"]                           # debug/error/info logging in client.rs
+```
+
+- `default-features = false` で最小構成（`ask()` / `ask_structured()` のみ）
+- `StreamEvent` は `stream.rs` モジュール内に定義（`stream` feature でゲート）
+- tracing は `client.rs` 内の条件付きマクロ（`trace_debug!` 等）で吸収
 
 ### Error Variants
 
