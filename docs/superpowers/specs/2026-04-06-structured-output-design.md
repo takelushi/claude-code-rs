@@ -21,7 +21,7 @@
 structured = ["dep:schemars"]
 
 [dependencies]
-schemars = { version = "0.8", optional = true }
+schemars = { version = "1", optional = true }
 ```
 
 | API | feature なし | `structured` 有効 |
