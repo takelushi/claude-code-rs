@@ -14,6 +14,10 @@ pub struct ClaudeConfig {
     pub max_turns: Option<u32>,
     /// Timeout duration. No timeout when `None`. Library-only; not a CLI flag.
     pub timeout: Option<Duration>,
+    /// Idle timeout for streams. If no event arrives within this duration,
+    /// the stream yields [`ClaudeError::Timeout`](crate::ClaudeError::Timeout)
+    /// and terminates. Library-only; not a CLI flag.
+    pub stream_idle_timeout: Option<Duration>,
     /// Fallback model when default is overloaded (`--fallback-model`).
     pub fallback_model: Option<String>,
     /// Effort level (`--effort`). Use [`effort`] constants for known values.
@@ -81,6 +85,7 @@ impl ClaudeConfig {
             append_system_prompt: self.append_system_prompt.clone(),
             max_turns: self.max_turns,
             timeout: self.timeout,
+            stream_idle_timeout: self.stream_idle_timeout,
             fallback_model: self.fallback_model.clone(),
             effort: self.effort.clone(),
             max_budget_usd: self.max_budget_usd,
@@ -285,6 +290,7 @@ pub struct ClaudeConfigBuilder {
     append_system_prompt: Option<String>,
     max_turns: Option<u32>,
     timeout: Option<Duration>,
+    stream_idle_timeout: Option<Duration>,
     fallback_model: Option<String>,
     effort: Option<String>,
     max_budget_usd: Option<f64>,
@@ -343,6 +349,16 @@ impl ClaudeConfigBuilder {
     #[must_use]
     pub fn timeout(mut self, timeout: Duration) -> Self {
         self.timeout = Some(timeout);
+        self
+    }
+
+    /// Sets the idle timeout for streams.
+    ///
+    /// If no event arrives within this duration, the stream yields
+    /// [`ClaudeError::Timeout`](crate::ClaudeError::Timeout) and terminates.
+    #[must_use]
+    pub fn stream_idle_timeout(mut self, timeout: Duration) -> Self {
+        self.stream_idle_timeout = Some(timeout);
         self
     }
 
@@ -564,6 +580,7 @@ impl ClaudeConfigBuilder {
             append_system_prompt: self.append_system_prompt,
             max_turns: self.max_turns,
             timeout: self.timeout,
+            stream_idle_timeout: self.stream_idle_timeout,
             fallback_model: self.fallback_model,
             effort: self.effort,
             max_budget_usd: self.max_budget_usd,
@@ -630,6 +647,20 @@ mod tests {
         assert!(config.system_prompt.is_none());
         assert!(config.max_turns.is_none());
         assert!(config.timeout.is_none());
+    }
+
+    #[test]
+    fn builder_sets_stream_idle_timeout() {
+        let config = ClaudeConfig::builder()
+            .stream_idle_timeout(Duration::from_secs(60))
+            .build();
+        assert_eq!(config.stream_idle_timeout, Some(Duration::from_secs(60)));
+    }
+
+    #[test]
+    fn default_stream_idle_timeout_is_none() {
+        let config = ClaudeConfig::default();
+        assert!(config.stream_idle_timeout.is_none());
     }
 
     #[test]
