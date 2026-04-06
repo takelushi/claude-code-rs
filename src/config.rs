@@ -72,6 +72,41 @@ impl ClaudeConfig {
         ClaudeConfigBuilder::default()
     }
 
+    /// Creates a builder pre-filled with this configuration's values.
+    #[must_use]
+    pub fn to_builder(&self) -> ClaudeConfigBuilder {
+        ClaudeConfigBuilder {
+            model: self.model.clone(),
+            system_prompt: self.system_prompt.clone(),
+            append_system_prompt: self.append_system_prompt.clone(),
+            max_turns: self.max_turns,
+            timeout: self.timeout,
+            fallback_model: self.fallback_model.clone(),
+            effort: self.effort.clone(),
+            max_budget_usd: self.max_budget_usd,
+            allowed_tools: self.allowed_tools.clone(),
+            disallowed_tools: self.disallowed_tools.clone(),
+            tools: self.tools.clone(),
+            mcp_config: self.mcp_config.clone(),
+            setting_sources: self.setting_sources.clone(),
+            settings: self.settings.clone(),
+            json_schema: self.json_schema.clone(),
+            include_partial_messages: self.include_partial_messages,
+            include_hook_events: self.include_hook_events,
+            permission_mode: self.permission_mode.clone(),
+            dangerously_skip_permissions: self.dangerously_skip_permissions,
+            add_dir: self.add_dir.clone(),
+            file: self.file.clone(),
+            resume: self.resume.clone(),
+            session_id: self.session_id.clone(),
+            bare: self.bare,
+            no_session_persistence: self.no_session_persistence,
+            disable_slash_commands: self.disable_slash_commands,
+            strict_mcp_config: self.strict_mcp_config,
+            extra_args: self.extra_args.clone(),
+        }
+    }
+
     /// Builds common CLI arguments shared by JSON and stream-json modes.
     fn base_args(&self) -> Vec<String> {
         let mut args = vec!["--print".into()];
@@ -940,5 +975,43 @@ mod tests {
         let idx = args.iter().position(|a| a == "--disallowedTools").unwrap();
         assert_eq!(args[idx + 1], "Write");
         assert_eq!(args[idx + 2], "Bash");
+    }
+
+    #[test]
+    fn to_builder_round_trip_fields() {
+        let original = ClaudeConfig::builder()
+            .model("haiku")
+            .system_prompt("test")
+            .max_turns(5)
+            .timeout(Duration::from_secs(30))
+            .no_session_persistence(false)
+            .resume("session-123")
+            .build();
+
+        let rebuilt = original.to_builder().build();
+
+        assert_eq!(rebuilt.model, original.model);
+        assert_eq!(rebuilt.system_prompt, original.system_prompt);
+        assert_eq!(rebuilt.max_turns, original.max_turns);
+        assert_eq!(rebuilt.timeout, original.timeout);
+        assert_eq!(
+            rebuilt.no_session_persistence,
+            original.no_session_persistence
+        );
+        assert_eq!(rebuilt.resume, original.resume);
+    }
+
+    #[test]
+    fn to_builder_round_trip_args() {
+        let config = ClaudeConfig::builder()
+            .model("haiku")
+            .max_turns(3)
+            .effort("high")
+            .allowed_tools(["Bash", "Read"])
+            .no_session_persistence(false)
+            .build();
+
+        let rebuilt = config.to_builder().build();
+        assert_eq!(config.to_args("hi"), rebuilt.to_args("hi"));
     }
 }
