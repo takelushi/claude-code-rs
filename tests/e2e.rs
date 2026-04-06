@@ -1,6 +1,6 @@
 #[cfg(feature = "stream")]
-use claude_code_rs::StreamEvent;
-use claude_code_rs::{ClaudeClient, ClaudeConfig};
+use claude_code::StreamEvent;
+use claude_code::{ClaudeClient, ClaudeConfig};
 use std::time::Duration;
 #[cfg(feature = "stream")]
 use tokio_stream::StreamExt;
@@ -58,7 +58,7 @@ async fn e2e_ask_stream_with_haiku() {
 #[tokio::test]
 #[ignore] // Run explicitly with: cargo test -- --ignored
 async fn e2e_check_cli() {
-    let version = claude_code_rs::check_cli().await.unwrap();
+    let version = claude_code::check_cli().await.unwrap();
     assert!(
         !version.is_empty(),
         "check_cli should return a non-empty version string"

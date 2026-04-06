@@ -15,14 +15,14 @@ struct CityInfo {
 
 #[tokio::main]
 async fn main() {
-    let schema = claude_code_rs::generate_schema::<CityInfo>().expect("schema generation failed");
+    let schema = claude_code::generate_schema::<CityInfo>().expect("schema generation failed");
 
-    let config = claude_code_rs::ClaudeConfig::builder()
+    let config = claude_code::ClaudeConfig::builder()
         .model("haiku")
         .max_turns(1)
         .json_schema(&schema)
         .build();
-    let client = claude_code_rs::ClaudeClient::new(config);
+    let client = claude_code::ClaudeClient::new(config);
 
     let prompt = std::env::args()
         .nth(1)

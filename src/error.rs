@@ -1,6 +1,6 @@
 use std::io;
 
-/// Error types for claude-code-rs.
+/// Error types for claude-code.
 #[derive(Debug, thiserror::Error)]
 #[non_exhaustive]
 pub enum ClaudeError {

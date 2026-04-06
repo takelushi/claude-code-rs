@@ -6,12 +6,12 @@
 
 #[tokio::main]
 async fn main() {
-    let config = claude_code_rs::ClaudeConfig::builder()
+    let config = claude_code::ClaudeConfig::builder()
         .model("haiku")
         .no_session_persistence(false)
         .max_turns(1)
         .build();
-    let client = claude_code_rs::ClaudeClient::new(config);
+    let client = claude_code::ClaudeClient::new(config);
     let mut conv = client.conversation();
 
     // Turn 1

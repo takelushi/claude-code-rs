@@ -2,8 +2,8 @@
 //! Requires `claude` CLI in PATH. Run with `cargo test -- --ignored`.
 
 #[cfg(feature = "stream")]
-use claude_code_rs::StreamExt;
-use claude_code_rs::{ClaudeClient, ClaudeConfig};
+use claude_code::StreamExt;
+use claude_code::{ClaudeClient, ClaudeConfig};
 
 #[tokio::test]
 #[ignore]

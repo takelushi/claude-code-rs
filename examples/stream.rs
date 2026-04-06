@@ -1,6 +1,6 @@
 use std::io::Write;
 
-use claude_code_rs::StreamExt;
+use claude_code::StreamExt;
 
 #[tokio::main]
 async fn main() {
@@ -9,11 +9,11 @@ async fn main() {
         .unwrap_or_else(|| "Say hello".into());
     // include_partial_messages(true) enables real-time token-level Text/Thinking deltas.
     // Without it, only complete AssistantText/AssistantThinking messages are emitted.
-    let config = claude_code_rs::ClaudeConfig::builder()
+    let config = claude_code::ClaudeConfig::builder()
         .max_turns(1)
         .include_partial_messages(true)
         .build();
-    let client = claude_code_rs::ClaudeClient::new(config);
+    let client = claude_code::ClaudeClient::new(config);
 
     let mut stream = match client.ask_stream(&prompt).await {
         Ok(s) => s,
@@ -25,11 +25,11 @@ async fn main() {
 
     while let Some(event) = stream.next().await {
         match event {
-            Ok(claude_code_rs::StreamEvent::Text(text)) => {
+            Ok(claude_code::StreamEvent::Text(text)) => {
                 print!("{text}");
                 std::io::stdout().flush().unwrap();
             }
-            Ok(claude_code_rs::StreamEvent::Result(resp)) => {
+            Ok(claude_code::StreamEvent::Result(resp)) => {
                 println!("\n---");
                 println!("Cost: ${:.6}", resp.total_cost_usd);
                 println!(
