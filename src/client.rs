@@ -57,6 +57,23 @@ impl CommandRunner for DefaultRunner {
     }
 }
 
+/// RAII guard that kills the child process on drop.
+///
+/// tokio's `Child` does NOT kill the process on drop — it detaches.
+/// This guard ensures the CLI subprocess is killed when the stream
+/// is dropped (e.g., client disconnection).
+#[cfg(feature = "stream")]
+struct ChildGuard(Option<tokio::process::Child>);
+
+#[cfg(feature = "stream")]
+impl Drop for ChildGuard {
+    fn drop(&mut self) {
+        if let Some(ref mut child) = self.0 {
+            let _ = child.start_kill();
+        }
+    }
+}
+
 /// Claude Code CLI client.
 #[derive(Debug, Clone)]
 pub struct ClaudeClient<R: CommandRunner = DefaultRunner> {
@@ -116,6 +133,7 @@ impl ClaudeClient {
         let stdout = child.stdout.take().expect("stdout must be piped");
         let reader = BufReader::new(stdout);
         let event_stream = parse_stream(reader);
+        let mut guard = ChildGuard(Some(child));
 
         Ok(Box::pin(async_stream::stream! {
             tokio::pin!(event_stream);
@@ -123,21 +141,25 @@ impl ClaudeClient {
                 yield Ok(event);
             }
 
-            let status = child.wait().await;
-            match status {
-                Ok(s) if !s.success() => {
-                    let code = s.code().unwrap_or(-1);
-                    let mut stderr_buf = Vec::new();
-                    if let Some(mut stderr) = child.stderr.take() {
-                        let _ = tokio::io::AsyncReadExt::read_to_end(&mut stderr, &mut stderr_buf).await;
+            // Take child out of guard to wait for exit status.
+            // If stream is dropped before reaching here, guard's Drop kills the process.
+            if let Some(mut child) = guard.0.take() {
+                let status = child.wait().await;
+                match status {
+                    Ok(s) if !s.success() => {
+                        let code = s.code().unwrap_or(-1);
+                        let mut stderr_buf = Vec::new();
+                        if let Some(mut stderr) = child.stderr.take() {
+                            let _ = tokio::io::AsyncReadExt::read_to_end(&mut stderr, &mut stderr_buf).await;
+                        }
+                        let stderr_str = String::from_utf8_lossy(&stderr_buf).into_owned();
+                        yield Err(ClaudeError::NonZeroExit { code, stderr: stderr_str });
                     }
-                    let stderr_str = String::from_utf8_lossy(&stderr_buf).into_owned();
-                    yield Err(ClaudeError::NonZeroExit { code, stderr: stderr_str });
+                    Err(e) => {
+                        yield Err(ClaudeError::Io(e));
+                    }
+                    Ok(_) => {}
                 }
-                Err(e) => {
-                    yield Err(ClaudeError::Io(e));
-                }
-                Ok(_) => {}
             }
         }))
     }
