@@ -32,6 +32,7 @@ cargo fmt                      # フォーマット適用
 cargo doc --open               # ドキュメント生成
 cargo run --example simple     # 動作確認
 cargo run --example stream     # ストリーミング動作確認
+cargo run --example stream-all # 全イベント表示
 ```
 
 ### Workflow
@@ -54,6 +55,7 @@ src/
 examples/
   simple.rs     # 最小限の動作確認用サンプル
   stream.rs     # ストリーミング動作確認用サンプル
+  stream-all.rs # 全イベント表示サンプル
 ```
 
 ### Error Variants
