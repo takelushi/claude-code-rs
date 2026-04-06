@@ -147,6 +147,34 @@ impl ClaudeConfigBuilder {
     }
 }
 
+/// Known values for the `--effort` CLI option.
+pub mod effort {
+    /// Low effort.
+    pub const LOW: &str = "low";
+    /// Medium effort.
+    pub const MEDIUM: &str = "medium";
+    /// High effort.
+    pub const HIGH: &str = "high";
+    /// Maximum effort.
+    pub const MAX: &str = "max";
+}
+
+/// Known values for the `--permission-mode` CLI option.
+pub mod permission_mode {
+    /// Default permission mode.
+    pub const DEFAULT: &str = "default";
+    /// Accept edits without confirmation.
+    pub const ACCEPT_EDITS: &str = "acceptEdits";
+    /// Automatic permission handling.
+    pub const AUTO: &str = "auto";
+    /// Bypass all permission checks.
+    pub const BYPASS_PERMISSIONS: &str = "bypassPermissions";
+    /// Never ask for permission.
+    pub const DONT_ASK: &str = "dontAsk";
+    /// Plan mode.
+    pub const PLAN: &str = "plan";
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
