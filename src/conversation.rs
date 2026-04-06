@@ -133,6 +133,12 @@ impl Conversation {
     /// Sends a prompt and returns a stream of events.
     ///
     /// Shorthand for `ask_stream_with(prompt, |b| b)`.
+    ///
+    /// Only available for `Conversation<DefaultRunner>` (i.e., conversations
+    /// created via [`ClaudeClient::new`]). The [`CommandRunner`] trait's
+    /// [`run`](CommandRunner::run) method returns a completed [`std::process::Output`],
+    /// which cannot support streaming; therefore streaming always spawns a
+    /// real CLI subprocess.
     pub async fn ask_stream(
         &mut self,
         prompt: &str,
@@ -149,6 +155,9 @@ impl Conversation {
     /// All events are passed through transparently. Internally, `session_id`
     /// is captured from [`StreamEvent::SystemInit`] and updated from
     /// [`StreamEvent::Result`].
+    ///
+    /// Only available for `Conversation<DefaultRunner>`. See [`ask_stream`](Self::ask_stream)
+    /// for details on the streaming constraint.
     pub async fn ask_stream_with<F>(
         &mut self,
         prompt: &str,
