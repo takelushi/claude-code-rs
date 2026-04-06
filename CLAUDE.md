@@ -53,6 +53,7 @@ src/
   types.rs         # JSON/stream-json 両方の型定義のみ
   error.rs         # エラー型
   stream.rs        # stream-json のパース・イテレーション・バッファリング
+  structured.rs    # generate_schema (structured feature gated)
 examples/
   simple.rs        # 最小限の動作確認用サンプル
   stream.rs        # ストリーミング動作確認用サンプル
@@ -69,6 +70,7 @@ examples/
 - `ParseError` — JSON / stream-json レスポンスのデシリアライズ失敗
 - `Timeout` — 指定時間内に応答が返らなかった
 - `Io` — プロセス起動・stdout/stderr 読み取り等の I/O エラー
+- `StructuredOutputError { raw_result, source }` — CLI は成功したが result の JSON デシリアライズに失敗した
 
 ### Testing Strategy
 
