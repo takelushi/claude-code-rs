@@ -146,6 +146,9 @@ impl Conversation {
     /// [`run`](CommandRunner::run) method returns a completed [`std::process::Output`],
     /// which cannot support streaming; therefore streaming always spawns a
     /// real CLI subprocess.
+    ///
+    /// **Note:** Timeout from the base config is **not** applied to streams.
+    /// Use [`tokio_stream::StreamExt::timeout()`] if needed.
     pub async fn ask_stream(
         &mut self,
         prompt: &str,

@@ -348,7 +348,7 @@ fn parse_content_block_delta(json: &Value) -> Vec<StreamEvent> {
 fn parse_result(json: &Value) -> Vec<StreamEvent> {
     match serde_json::from_value::<ClaudeResponse>(json.clone()) {
         Ok(resp) => vec![StreamEvent::Result(resp)],
-        Err(_) => vec![],
+        Err(_) => vec![StreamEvent::Unknown(json.clone())],
     }
 }
 

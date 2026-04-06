@@ -30,9 +30,11 @@ cargo clippy                   # lint
 cargo fmt --check              # フォーマットチェック
 cargo fmt                      # フォーマット適用
 cargo doc --open               # ドキュメント生成
-cargo run --example simple     # 動作確認
-cargo run --example stream     # ストリーミング動作確認
-cargo run --example stream-all # 全イベント表示
+cargo run --example simple            # 動作確認
+cargo run --example stream            # ストリーミング動作確認
+cargo run --example stream-all        # 全イベント表示
+cargo run --example multi_turn        # 複数ターン会話
+cargo run --example structured_output # 構造化出力
 ```
 
 ### Workflow
@@ -57,8 +59,9 @@ src/
 examples/
   simple.rs        # 最小限の動作確認用サンプル
   stream.rs        # ストリーミング動作確認用サンプル
-  stream-all.rs    # 全イベント表示サンプル
-  multi_turn.rs    # 複数ターン会話サンプル
+  stream-all.rs         # 全イベント表示サンプル
+  multi_turn.rs         # 複数ターン会話サンプル
+  structured_output.rs  # 構造化出力サンプル
 ```
 
 ### Feature Flags

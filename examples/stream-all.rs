@@ -94,8 +94,9 @@ async fn main() {
             Ok(claude_code_rs::StreamEvent::Unknown(val)) => {
                 eprintln!("[unknown] {val}");
             }
+            // Future StreamEvent variants (non_exhaustive)
+            Ok(_) => {}
             Err(e) => eprintln!("\nStream error: {e}"),
-            _ => {}
         }
     }
     println!();

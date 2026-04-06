@@ -58,7 +58,7 @@ impl CommandRunner for DefaultRunner {
 }
 
 /// Claude Code CLI client.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct ClaudeClient<R: CommandRunner = DefaultRunner> {
     config: ClaudeConfig,
     runner: R,
