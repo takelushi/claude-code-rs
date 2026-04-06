@@ -278,6 +278,38 @@ impl<R: CommandRunner + Clone> ClaudeClient<R> {
     }
 }
 
+/// Checks that the `claude` CLI is available and returns its version string.
+///
+/// Runs `claude --version` and returns the trimmed stdout on success.
+///
+/// # Errors
+///
+/// - [`ClaudeError::CliNotFound`] if `claude` is not in PATH.
+/// - [`ClaudeError::NonZeroExit`] if the command fails.
+/// - [`ClaudeError::Io`] for other I/O errors.
+pub async fn check_cli() -> Result<String, ClaudeError> {
+    let output = TokioCommand::new("claude")
+        .arg("--version")
+        .output()
+        .await
+        .map_err(|e| {
+            if e.kind() == std::io::ErrorKind::NotFound {
+                ClaudeError::CliNotFound
+            } else {
+                ClaudeError::Io(e)
+            }
+        })?;
+
+    if !output.status.success() {
+        let code = output.status.code().unwrap_or(-1);
+        let stderr = String::from_utf8_lossy(&output.stderr).into_owned();
+        return Err(ClaudeError::NonZeroExit { code, stderr });
+    }
+
+    let version = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    Ok(version)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

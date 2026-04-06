@@ -54,3 +54,13 @@ async fn e2e_ask_stream_with_haiku() {
     assert!(got_text, "should have received at least one Text event");
     assert!(got_result, "should have received a Result event");
 }
+
+#[tokio::test]
+#[ignore] // Run explicitly with: cargo test -- --ignored
+async fn e2e_check_cli() {
+    let version = claude_code_rs::check_cli().await.unwrap();
+    assert!(
+        !version.is_empty(),
+        "check_cli should return a non-empty version string"
+    );
+}
