@@ -9,6 +9,7 @@ use tokio::process::Command as TokioCommand;
 use tokio_stream::Stream;
 
 use crate::config::ClaudeConfig;
+use crate::conversation::Conversation;
 use crate::error::ClaudeError;
 use crate::stream::parse_stream;
 use crate::types::{ClaudeResponse, StreamEvent, strip_ansi};
@@ -166,6 +167,29 @@ impl<R: CommandRunner> ClaudeClient<R> {
 
         tracing::info!("claude CLI returned successfully");
         Ok(response)
+    }
+}
+
+impl<R: CommandRunner + Clone> ClaudeClient<R> {
+    /// Creates a new [`Conversation`] for multi-turn interaction.
+    ///
+    /// The conversation manages `session_id` automatically, injecting
+    /// `--resume` from the second turn onwards.
+    ///
+    /// Callers must set [`crate::ClaudeConfigBuilder::no_session_persistence`]`(false)`
+    /// for multi-turn to work.
+    #[must_use]
+    pub fn conversation(&self) -> Conversation<R> {
+        Conversation::with_runner(self.config.clone(), self.runner.clone())
+    }
+
+    /// Creates a [`Conversation`] that resumes an existing session.
+    ///
+    /// The first `ask()` / `ask_stream()` call will include `--resume`
+    /// with the given session ID.
+    #[must_use]
+    pub fn conversation_resume(&self, session_id: impl Into<String>) -> Conversation<R> {
+        Conversation::with_runner_resume(self.config.clone(), self.runner.clone(), session_id)
     }
 }
 

@@ -391,4 +391,28 @@ mod tests {
 
         assert_eq!(*session_id.lock().unwrap(), Some("new-sid".to_string()));
     }
+
+    #[tokio::test]
+    async fn client_conversation_creates_working_conversation() {
+        let runner = RecordingRunner::new(vec![make_success_output("sid-001")]);
+        let config = ClaudeConfig::builder().model("haiku").build();
+        let client = ClaudeClient::with_runner(config, runner);
+
+        let mut conv = client.conversation();
+        let resp = conv.ask("hello").await.unwrap();
+        assert_eq!(resp.session_id, "sid-001");
+    }
+
+    #[tokio::test]
+    async fn client_conversation_resume_sends_resume() {
+        let runner = RecordingRunner::new(vec![make_success_output("sid-001")]);
+        let client = ClaudeClient::with_runner(ClaudeConfig::default(), runner.clone());
+
+        let mut conv = client.conversation_resume("existing-sid");
+        conv.ask("hello").await.unwrap();
+
+        let args = &runner.captured_args()[0];
+        let idx = args.iter().position(|a| a == "--resume").unwrap();
+        assert_eq!(args[idx + 1], "existing-sid");
+    }
 }
