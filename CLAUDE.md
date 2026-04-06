@@ -46,16 +46,18 @@ cargo run --example stream-all # 全イベント表示
 
 ```plain
 src/
-  lib.rs        # pub API re-export
-  client.rs     # ClaudeClient (CLI実行の中核)
-  config.rs     # ClaudeConfig (--model, --system-prompt 等のオプション)
-  types.rs      # JSON/stream-json 両方の型定義のみ
-  error.rs      # エラー型
-  stream.rs     # stream-json のパース・イテレーション・バッファリング
+  lib.rs           # pub API re-export
+  client.rs        # ClaudeClient (CLI実行の中核)
+  config.rs        # ClaudeConfig (--model, --system-prompt 等のオプション)
+  conversation.rs  # Conversation (session_id 自動管理の複数ターン会話)
+  types.rs         # JSON/stream-json 両方の型定義のみ
+  error.rs         # エラー型
+  stream.rs        # stream-json のパース・イテレーション・バッファリング
 examples/
-  simple.rs     # 最小限の動作確認用サンプル
-  stream.rs     # ストリーミング動作確認用サンプル
-  stream-all.rs # 全イベント表示サンプル
+  simple.rs        # 最小限の動作確認用サンプル
+  stream.rs        # ストリーミング動作確認用サンプル
+  stream-all.rs    # 全イベント表示サンプル
+  multi_turn.rs    # 複数ターン会話サンプル
 ```
 
 ### Error Variants

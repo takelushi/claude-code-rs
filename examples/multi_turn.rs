@@ -1,21 +1,22 @@
-// Multi-turn conversation example.
-// Uses --resume to continue a session across multiple ask() calls.
+// Multi-turn conversation example using the Conversation API.
+// Automatically manages session_id across turns via --resume.
 // Requires no_session_persistence(false) so the CLI saves the session to disk.
 //
 // Usage: cargo run --example multi_turn
 
 #[tokio::main]
 async fn main() {
-    // Turn 1: initial question
     let config = claude_code_rs::ClaudeConfig::builder()
         .model("haiku")
         .no_session_persistence(false)
         .max_turns(1)
         .build();
     let client = claude_code_rs::ClaudeClient::new(config);
+    let mut conv = client.conversation();
 
+    // Turn 1
     println!("[Turn 1] Asking: What is 2+2?");
-    let resp1 = match client.ask("What is 2+2? Answer in one word.").await {
+    let resp1 = match conv.ask("What is 2+2? Answer in one word.").await {
         Ok(r) => r,
         Err(e) => {
             eprintln!("Error: {e}");
@@ -25,17 +26,9 @@ async fn main() {
     println!("[Turn 1] Response: {}", resp1.result);
     println!("[Turn 1] Session: {}", resp1.session_id);
 
-    // Turn 2: follow-up using --resume with the session ID from turn 1
-    let config2 = claude_code_rs::ClaudeConfig::builder()
-        .model("haiku")
-        .no_session_persistence(false)
-        .max_turns(1)
-        .resume(&resp1.session_id)
-        .build();
-    let client2 = claude_code_rs::ClaudeClient::new(config2);
-
+    // Turn 2: session_id is automatically managed
     println!("\n[Turn 2] Asking: What was my previous question?");
-    let resp2 = match client2
+    let resp2 = match conv
         .ask("What was my previous question? Repeat it exactly.")
         .await
     {

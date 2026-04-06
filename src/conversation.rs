@@ -1,6 +1,3 @@
-// Items are pub/pub(crate) but not yet wired into the public API (Task 4/5).
-#![allow(dead_code)]
-
 use std::pin::Pin;
 use std::sync::{Arc, Mutex};
 
