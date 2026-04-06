@@ -119,3 +119,9 @@ message_start
 このオプションを付けると、`stream_event` 型のイベントが追加で送信され、テキストがトークン単位のチャンクでリアルタイムにストリーミングされる。デフォルト（なし）では `assistant` イベントとして完成したメッセージのみが送信される。
 
 リアルタイム表示が必要な場合は `include_partial_messages(true)` を有効にし、`Text` / `Thinking` バリアントを使う。完成テキストだけ必要な場合は `AssistantText` / `AssistantThinking` を使う。
+
+## tokio Child の drop 挙動
+
+tokio の `Child` は drop 時にプロセスを kill しない。detach されるだけであり、親プロセスが終了するまでゾンビ的に残る可能性がある。
+
+ライブラリでは `ask_stream` 内で `ChildGuard` RAII ラッパーを使い、ストリーム drop 時に `start_kill()` で SIGKILL を送ることで対処している。`start_kill()` は非同期ではなく即座にシグナルを送るため `Drop` トレイト内から呼べる。
