@@ -68,6 +68,8 @@ impl ClaudeClient {
     {
         let args = self.config.to_stream_args(prompt);
 
+        tracing::debug!(args = ?args, "spawning claude CLI stream");
+
         let mut child = TokioCommand::new("claude")
             .args(&args)
             .stdout(std::process::Stdio::piped())
@@ -122,31 +124,47 @@ impl<R: CommandRunner> ClaudeClient<R> {
     pub async fn ask(&self, prompt: &str) -> Result<ClaudeResponse, ClaudeError> {
         let args = self.config.to_args(prompt);
 
+        tracing::debug!(args = ?args, "executing claude CLI");
+
         let io_result: std::io::Result<Output> = if let Some(timeout) = self.config.timeout {
             tokio::time::timeout(timeout, self.runner.run(&args))
                 .await
-                .map_err(|_| ClaudeError::Timeout)?
+                .map_err(|_| {
+                    let err = ClaudeError::Timeout;
+                    tracing::error!(error = %err, "claude CLI failed");
+                    err
+                })?
         } else {
             self.runner.run(&args).await
         };
 
         let output = io_result.map_err(|e| {
-            if e.kind() == std::io::ErrorKind::NotFound {
+            let err = if e.kind() == std::io::ErrorKind::NotFound {
                 ClaudeError::CliNotFound
             } else {
                 ClaudeError::Io(e)
-            }
+            };
+            tracing::error!(error = %err, "claude CLI failed");
+            err
         })?;
 
         if !output.status.success() {
             let code = output.status.code().unwrap_or(-1);
             let stderr = String::from_utf8_lossy(&output.stderr).into_owned();
-            return Err(ClaudeError::NonZeroExit { code, stderr });
+            let err = ClaudeError::NonZeroExit { code, stderr };
+            tracing::error!(error = %err, "claude CLI failed");
+            return Err(err);
         }
 
         let stdout = String::from_utf8_lossy(&output.stdout);
         let json_str = strip_ansi(&stdout);
-        let response: ClaudeResponse = serde_json::from_str(json_str)?;
+        let response: ClaudeResponse = serde_json::from_str(json_str).map_err(|e| {
+            let err = ClaudeError::ParseError(e);
+            tracing::error!(error = %err, "claude CLI failed");
+            err
+        })?;
+
+        tracing::info!("claude CLI returned successfully");
         Ok(response)
     }
 }
