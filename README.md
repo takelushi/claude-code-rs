@@ -1,4 +1,11 @@
-# claude-code-rs
+# claude-code
+
+[![Crates.io](https://img.shields.io/crates/v/claude-code.svg)](https://crates.io/crates/claude-code)
+[![docs.rs](https://docs.rs/claude-code/badge.svg)](https://docs.rs/claude-code)
+[![CI](https://github.com/takelushi/claude-code-rs/actions/workflows/ci.yml/badge.svg)](https://github.com/takelushi/claude-code-rs/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+
+> **Unofficial** — This library is not affiliated with or endorsed by Anthropic. "Claude" is a trademark of Anthropic.
 
 A Rust library for executing [Claude Code CLI](https://docs.anthropic.com/en/docs/claude-code) (`claude --print`) as a subprocess and handling results in a type-safe way.
 
@@ -10,7 +17,7 @@ Add to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-claude-code-rs = "0.1"
+claude-code = "0.1"
 tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
 ```
 
@@ -25,7 +32,7 @@ The `claude` CLI must be installed and available in your `PATH`. See the [Claude
 ```rust
 #[tokio::main]
 async fn main() {
-    let client = claude_code_rs::ClaudeClient::new(claude_code_rs::ClaudeConfig::default());
+    let client = claude_code::ClaudeClient::new(claude_code::ClaudeConfig::default());
     match client.ask("Say hello").await {
         Ok(resp) => println!("{}", resp.result),
         Err(e) => eprintln!("Error: {e}"),
@@ -36,20 +43,20 @@ async fn main() {
 ### Streaming
 
 ```rust
-use claude_code_rs::StreamExt;
+use claude_code::StreamExt;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let config = claude_code_rs::ClaudeConfig::builder()
+    let config = claude_code::ClaudeConfig::builder()
         .max_turns(1)
         .include_partial_messages(true)
         .build();
-    let client = claude_code_rs::ClaudeClient::new(config);
+    let client = claude_code::ClaudeClient::new(config);
     let mut stream = client.ask_stream("Say hello").await?;
     while let Some(event) = stream.next().await {
         match event {
-            Ok(claude_code_rs::StreamEvent::Text(text)) => print!("{text}"),
-            Ok(claude_code_rs::StreamEvent::Result(resp)) => {
+            Ok(claude_code::StreamEvent::Text(text)) => print!("{text}"),
+            Ok(claude_code::StreamEvent::Result(resp)) => {
                 println!("\nCost: ${:.6}", resp.total_cost_usd);
             }
             Ok(_) => {}
@@ -68,22 +75,22 @@ Use `resume` to continue a conversation across multiple turns by passing the ses
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Turn 1
-    let config = claude_code_rs::ClaudeConfig::builder()
+    let config = claude_code::ClaudeConfig::builder()
         .model("haiku")
         .no_session_persistence(false)
         .max_turns(1)
         .build();
-    let client = claude_code_rs::ClaudeClient::new(config);
+    let client = claude_code::ClaudeClient::new(config);
     let resp1 = client.ask("What is 2+2?").await?;
 
     // Turn 2: resume with session ID
-    let config2 = claude_code_rs::ClaudeConfig::builder()
+    let config2 = claude_code::ClaudeConfig::builder()
         .model("haiku")
         .no_session_persistence(false)
         .max_turns(1)
         .resume(&resp1.session_id)
         .build();
-    let client2 = claude_code_rs::ClaudeClient::new(config2);
+    let client2 = claude_code::ClaudeClient::new(config2);
     let resp2 = client2.ask("What was my previous question?").await?;
     println!("{}", resp2.result);
 
@@ -98,12 +105,12 @@ The `Conversation` API manages `session_id` automatically across turns:
 ```rust
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let config = claude_code_rs::ClaudeConfig::builder()
+    let config = claude_code::ClaudeConfig::builder()
         .model("haiku")
         .no_session_persistence(false) // required for multi-turn
         .max_turns(1)
         .build();
-    let client = claude_code_rs::ClaudeClient::new(config);
+    let client = claude_code::ClaudeClient::new(config);
 
     let mut conv = client.conversation();
     let r1 = conv.ask("What is 2+2?").await?;
@@ -139,13 +146,13 @@ struct CityInfo {
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let schema = claude_code_rs::generate_schema::<CityInfo>()?;
-    let config = claude_code_rs::ClaudeConfig::builder()
+    let schema = claude_code::generate_schema::<CityInfo>()?;
+    let config = claude_code::ClaudeConfig::builder()
         .model("haiku")
         .max_turns(1)
         .json_schema(&schema)
         .build();
-    let client = claude_code_rs::ClaudeClient::new(config);
+    let client = claude_code::ClaudeClient::new(config);
 
     let city: CityInfo = client.ask_structured("Tell me about Tokyo").await?;
     println!("{}: population {}", city.name, city.population);
@@ -158,12 +165,27 @@ Requires the `structured` feature (enabled by default). Add `schemars` to your d
 
 ```toml
 [dependencies]
-schemars = "0.8"
+schemars = "1"
+```
+
+## Feature Flags
+
+| Feature | Default | Description |
+|---|---|---|
+| `stream` | Yes | Enables `ask_stream`, `StreamEvent`, and `Conversation` stream methods. Adds `tokio-stream` and `async-stream` dependencies. |
+| `structured` | Yes | Enables `generate_schema` helper for JSON Schema generation. Adds `schemars` dependency. |
+| `tracing` | Yes | Enables debug/error/info logging via `tracing`. Adds `tracing` dependency. |
+
+To use a minimal configuration (only `ask()` and `ask_structured()`):
+
+```toml
+[dependencies]
+claude-code = { version = "0.1", default-features = false }
 ```
 
 ## Context Minimization Defaults
 
-By default, `claude-code-rs` applies a minimal configuration to reduce unnecessary context sent to the CLI. This keeps costs down and avoids side effects from user-level settings:
+By default, `claude-code` applies a minimal configuration to reduce unnecessary context sent to the CLI. This keeps costs down and avoids side effects from user-level settings:
 
 | Default | CLI Flag | Effect |
 |---|---|---|
@@ -178,7 +200,7 @@ By default, `claude-code-rs` applies a minimal configuration to reduce unnecessa
 All of these can be overridden via `ClaudeConfigBuilder`. For example, to re-enable session persistence:
 
 ```rust
-let config = claude_code_rs::ClaudeConfig::builder()
+let config = claude_code::ClaudeConfig::builder()
     .no_session_persistence(false)
     .build();
 ```
