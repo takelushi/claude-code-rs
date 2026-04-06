@@ -1,4 +1,7 @@
 use serde::Deserialize;
+use serde::de::DeserializeOwned;
+
+use crate::error::ClaudeError;
 
 /// JSON response from the Claude CLI.
 #[derive(Debug, Clone, Deserialize)]
@@ -139,6 +142,20 @@ pub enum StreamEvent {
     Unknown(serde_json::Value),
 }
 
+impl ClaudeResponse {
+    /// Deserializes the `result` field into a strongly-typed value.
+    ///
+    /// Works with both streaming and non-streaming responses.
+    /// The config must have `json_schema` set for the CLI to return
+    /// structured JSON in the `result` field.
+    pub fn parse_result<T: DeserializeOwned>(&self) -> Result<T, ClaudeError> {
+        serde_json::from_str(&self.result).map_err(|e| ClaudeError::StructuredOutputError {
+            raw_result: self.result.clone(),
+            source: e,
+        })
+    }
+}
+
 /// Strips ANSI escape sequences from stdout and extracts the JSON portion.
 pub(crate) fn strip_ansi(input: &str) -> &str {
     // CLI output may be wrapped with escape sequences like `\x1b[?1004l{...}\x1b[?1004l`.
@@ -191,5 +208,68 @@ mod tests {
     fn strip_ansi_no_json() {
         let input = "no json here";
         assert_eq!(strip_ansi(input), "no json here");
+    }
+
+    #[derive(Debug, Deserialize, PartialEq)]
+    struct Answer {
+        value: i32,
+    }
+
+    #[test]
+    fn parse_result_success() {
+        let json = include_str!("../tests/fixtures/structured_success.json");
+        let resp: ClaudeResponse = serde_json::from_str(json).unwrap();
+        let answer: Answer = resp.parse_result().unwrap();
+        assert_eq!(answer, Answer { value: 42 });
+    }
+
+    #[test]
+    fn parse_result_invalid_json() {
+        let resp = ClaudeResponse {
+            result: "not valid json".into(),
+            is_error: false,
+            duration_ms: 0,
+            num_turns: 0,
+            session_id: String::new(),
+            total_cost_usd: 0.0,
+            stop_reason: String::new(),
+            usage: Usage {
+                input_tokens: 0,
+                output_tokens: 0,
+                cache_read_input_tokens: 0,
+                cache_creation_input_tokens: 0,
+            },
+        };
+        let err = resp.parse_result::<Answer>().unwrap_err();
+        match err {
+            crate::error::ClaudeError::StructuredOutputError { raw_result, .. } => {
+                assert_eq!(raw_result, "not valid json");
+            }
+            _ => panic!("expected StructuredOutputError, got {err:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_result_type_mismatch() {
+        let resp = ClaudeResponse {
+            result: r#"{"wrong_field": "hello"}"#.into(),
+            is_error: false,
+            duration_ms: 0,
+            num_turns: 0,
+            session_id: String::new(),
+            total_cost_usd: 0.0,
+            stop_reason: String::new(),
+            usage: Usage {
+                input_tokens: 0,
+                output_tokens: 0,
+                cache_read_input_tokens: 0,
+                cache_creation_input_tokens: 0,
+            },
+        };
+        let err = resp.parse_result::<Answer>().unwrap_err();
+        assert!(matches!(
+            err,
+            crate::error::ClaudeError::StructuredOutputError { .. }
+        ));
     }
 }

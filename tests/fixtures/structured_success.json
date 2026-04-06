@@ -1,0 +1,22 @@
+{
+  "type": "result",
+  "subtype": "success",
+  "is_error": false,
+  "duration_ms": 3000,
+  "duration_api_ms": 2950,
+  "num_turns": 1,
+  "result": "{\"value\":42}",
+  "stop_reason": "end_turn",
+  "session_id": "test-session-structured",
+  "total_cost_usd": 0.01,
+  "usage": {
+    "input_tokens": 15,
+    "cache_creation_input_tokens": 0,
+    "cache_read_input_tokens": 0,
+    "output_tokens": 10,
+    "server_tool_use": {
+      "web_search_requests": 0,
+      "web_fetch_requests": 0
+    }
+  }
+}
