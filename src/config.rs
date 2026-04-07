@@ -3,10 +3,53 @@ use std::time::Duration;
 /// Default CLI command name.
 const DEFAULT_CLI_PATH: &str = "claude";
 
+/// Preset defines the base set of CLI flags injected before
+/// builder attributes and `extra_args`.
+///
+/// # Examples
+///
+/// ```
+/// use claude_code::Preset;
+///
+/// // Reusable custom preset
+/// let my_preset = Preset::Custom(vec![
+///     "--print".into(),
+///     "--no-session-persistence".into(),
+/// ]);
+/// ```
+#[derive(Debug, Clone, Default, PartialEq)]
+#[non_exhaustive]
+pub enum Preset {
+    /// All context-minimization defaults (current behavior).
+    ///
+    /// Injects: `--print`, `--no-session-persistence`, `--strict-mcp-config`,
+    /// `--disable-slash-commands`, `--setting-sources ""`, `--mcp-config '{}'`,
+    /// `--tools ""`, `--system-prompt ""`.
+    #[default]
+    Normal,
+
+    /// Only flags required for the library's parsing to work.
+    ///
+    /// Injects: `--print`. Format flags (`--output-format`, `--verbose`)
+    /// are added by `to_args()` / `to_stream_args()` regardless of preset.
+    Minimal,
+
+    /// No auto-injected flags. User has full control via builder attributes
+    /// and `extra_args`.
+    Bare,
+
+    /// User-defined base args. These are injected before builder attributes
+    /// and `extra_args`.
+    Custom(Vec<String>),
+}
+
 /// Configuration options for Claude CLI execution.
 #[derive(Debug, Clone, Default)]
 #[non_exhaustive]
 pub struct ClaudeConfig {
+    /// Preset that determines the base set of auto-injected CLI flags.
+    /// Defaults to [`Preset::Normal`].
+    pub preset: Preset,
     /// Path to the `claude` CLI binary. Defaults to `"claude"` (resolved via `PATH`).
     ///
     /// Use this to specify an absolute path when the binary is not on `PATH`,
@@ -99,6 +142,7 @@ impl ClaudeConfig {
     #[must_use]
     pub fn to_builder(&self) -> ClaudeConfigBuilder {
         ClaudeConfigBuilder {
+            preset: self.preset.clone(),
             cli_path: self.cli_path.clone(),
             model: self.model.clone(),
             system_prompt: self.system_prompt.clone(),
@@ -133,10 +177,33 @@ impl ClaudeConfig {
     }
 
     /// Builds common CLI arguments shared by JSON and stream-json modes.
+    ///
+    /// Argument generation priority:
+    /// 1. Preset base args
+    /// 2. Builder attributes
+    /// 3. `--output-format` / `--verbose` (added by `to_args()` / `to_stream_args()`)
+    /// 4. `extra_args`
+    /// 5. prompt (added by `to_args()` / `to_stream_args()`)
     fn base_args(&self) -> Vec<String> {
-        let mut args = vec!["--print".into()];
+        let mut args = self.preset_args();
+        self.push_builder_attrs(&mut args);
+        args.extend(self.extra_args.iter().cloned());
+        args
+    }
 
-        // --- Context minimization defaults (overridable) ---
+    /// Returns the base flags determined by the preset.
+    fn preset_args(&self) -> Vec<String> {
+        match &self.preset {
+            Preset::Normal => self.normal_preset_args(),
+            Preset::Minimal => self.minimal_preset_args(),
+            Preset::Bare => Vec::new(),
+            Preset::Custom(custom_args) => self.filtered_custom_args(custom_args),
+        }
+    }
+
+    /// Normal preset: all context-minimization defaults.
+    fn normal_preset_args(&self) -> Vec<String> {
+        let mut args = vec!["--print".into()];
 
         // no_session_persistence: None → enabled, Some(false) → disabled
         if self.no_session_persistence != Some(false) {
@@ -172,10 +239,80 @@ impl ClaudeConfig {
             args.push("--disable-slash-commands".into());
         }
 
-        // --- Standard options ---
+        args
+    }
 
-        args.push("--system-prompt".into());
-        args.push(self.system_prompt.clone().unwrap_or_default());
+    /// Minimal preset: only `--print`.
+    fn minimal_preset_args(&self) -> Vec<String> {
+        vec!["--print".into()]
+    }
+
+    /// Filters a custom preset's args by removing flags that builder attributes
+    /// explicitly disabled (e.g., `no_session_persistence == Some(false)`).
+    fn filtered_custom_args(&self, custom_args: &[String]) -> Vec<String> {
+        custom_args
+            .iter()
+            .filter(|arg| {
+                let s = arg.as_str();
+                !(self.no_session_persistence == Some(false) && s == "--no-session-persistence"
+                    || self.strict_mcp_config == Some(false) && s == "--strict-mcp-config"
+                    || self.disable_slash_commands == Some(false)
+                        && s == "--disable-slash-commands")
+            })
+            .cloned()
+            .collect()
+    }
+
+    /// Appends builder-attribute flags to the args vector.
+    ///
+    /// For Normal preset, context-minimization flags are already in the preset
+    /// args with their defaults. For other presets, these flags are only added
+    /// when explicitly set by the user.
+    fn push_builder_attrs(&self, args: &mut Vec<String>) {
+        let is_normal = matches!(self.preset, Preset::Normal);
+
+        // --- Context-minimization flags (preset-aware) ---
+        // For Normal: handled in normal_preset_args() with defaults.
+        // For others: only when explicitly set.
+        if !is_normal {
+            if self.no_session_persistence == Some(true) {
+                args.push("--no-session-persistence".into());
+            }
+
+            if let Some(ref val) = self.setting_sources {
+                args.push("--setting-sources".into());
+                args.push(val.clone());
+            }
+
+            if self.strict_mcp_config == Some(true) {
+                args.push("--strict-mcp-config".into());
+            }
+
+            if !self.mcp_config.is_empty() {
+                for cfg in &self.mcp_config {
+                    args.push("--mcp-config".into());
+                    args.push(cfg.clone());
+                }
+            }
+
+            if let Some(ref val) = self.tools {
+                args.push("--tools".into());
+                args.push(val.clone());
+            }
+
+            if self.disable_slash_commands == Some(true) {
+                args.push("--disable-slash-commands".into());
+            }
+        }
+
+        // system_prompt: Normal defaults to "" (empty); other presets only when set
+        if is_normal {
+            args.push("--system-prompt".into());
+            args.push(self.system_prompt.clone().unwrap_or_default());
+        } else if let Some(ref val) = self.system_prompt {
+            args.push("--system-prompt".into());
+            args.push(val.clone());
+        }
 
         if let Some(ref val) = self.append_system_prompt {
             args.push("--append-system-prompt".into());
@@ -263,11 +400,6 @@ impl ClaudeConfig {
         if self.bare == Some(true) {
             args.push("--bare".into());
         }
-
-        // extra_args: appended before prompt
-        args.extend(self.extra_args.iter().cloned());
-
-        args
     }
 
     /// Builds command-line arguments for JSON output mode.
@@ -305,6 +437,7 @@ impl ClaudeConfig {
 /// Builder for [`ClaudeConfig`].
 #[derive(Debug, Clone, Default)]
 pub struct ClaudeConfigBuilder {
+    preset: Preset,
     cli_path: Option<String>,
     model: Option<String>,
     system_prompt: Option<String>,
@@ -338,6 +471,15 @@ pub struct ClaudeConfigBuilder {
 }
 
 impl ClaudeConfigBuilder {
+    /// Sets the preset that determines which CLI flags are auto-injected.
+    ///
+    /// Defaults to [`Preset::Normal`].
+    #[must_use]
+    pub fn preset(mut self, preset: Preset) -> Self {
+        self.preset = preset;
+        self
+    }
+
     /// Sets the path to the `claude` CLI binary.
     ///
     /// When not set, `"claude"` is resolved via `PATH`.
@@ -605,6 +747,7 @@ impl ClaudeConfigBuilder {
     #[must_use]
     pub fn build(self) -> ClaudeConfig {
         ClaudeConfig {
+            preset: self.preset,
             cli_path: self.cli_path,
             model: self.model,
             system_prompt: self.system_prompt,
@@ -1100,5 +1243,49 @@ mod tests {
 
         let rebuilt = config.to_builder().build();
         assert_eq!(config.to_args("hi"), rebuilt.to_args("hi"));
+    }
+
+    // --- Preset tests ---
+
+    #[test]
+    fn default_preset_is_normal() {
+        let config = ClaudeConfig::default();
+        assert_eq!(config.preset, Preset::Normal);
+    }
+
+    #[test]
+    fn builder_default_preset_is_normal() {
+        let config = ClaudeConfig::builder().build();
+        assert_eq!(config.preset, Preset::Normal);
+    }
+
+    #[test]
+    fn explicit_normal_preset_matches_default_to_args() {
+        let default_config = ClaudeConfig::default();
+        let explicit_config = ClaudeConfig::builder().preset(Preset::Normal).build();
+        assert_eq!(
+            default_config.to_args("test"),
+            explicit_config.to_args("test")
+        );
+    }
+
+    #[test]
+    fn explicit_normal_preset_matches_default_to_stream_args() {
+        let default_config = ClaudeConfig::default();
+        let explicit_config = ClaudeConfig::builder().preset(Preset::Normal).build();
+        assert_eq!(
+            default_config.to_stream_args("test"),
+            explicit_config.to_stream_args("test")
+        );
+    }
+
+    #[test]
+    fn to_builder_preserves_preset() {
+        let config = ClaudeConfig::builder()
+            .preset(Preset::Minimal)
+            .model("haiku")
+            .build();
+        let rebuilt = config.to_builder().build();
+        assert_eq!(rebuilt.preset, Preset::Minimal);
     }
 }
