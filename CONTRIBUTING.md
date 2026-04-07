@@ -50,6 +50,11 @@ hotfix/*  ──→ develop ──→ main
 
 This is enforced by CI (`enforce-branch-policy.yml`) and branch protection rules on `main`.
 
+### Merge strategy
+
+`develop` → `main` merges **must use "Create a merge commit"** (no squash, no rebase). This preserves individual commit messages so that release-please can analyze conventional commit prefixes (`feat:`, `fix:`, etc.) to determine version bumps and generate changelogs. Squash merging would collapse all commits into a single `chore:` commit, causing release-please to miss releasable changes.
+
+This is enforced in the GitHub repository settings (Settings → General → Pull Requests → only "Allow merge commits" enabled for `main`).
 ### PR title for develop → main merges
 
 Use `chore: merge develop into main` as the PR title. Since these PRs bundle multiple change types (feat, fix, docs, ci, etc.), `chore` is the appropriate prefix.
