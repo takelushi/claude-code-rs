@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## 0.1.0 (2026-04-07)
+
+
+### Features
+
+* crates.io publication readiness improvements ([#1](https://github.com/takelushi/claude-code-rs/issues/1)) ([8a7c96b](https://github.com/takelushi/claude-code-rs/commit/8a7c96b1bde0ce47ceac09b40ae9bea780645c8c))
+
 ## [0.1.0] - 2026-04-06
 
 Initial release.
