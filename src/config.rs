@@ -1,9 +1,22 @@
 use std::time::Duration;
 
+/// Default CLI command name.
+const DEFAULT_CLI_PATH: &str = "claude";
+
 /// Configuration options for Claude CLI execution.
 #[derive(Debug, Clone, Default)]
 #[non_exhaustive]
 pub struct ClaudeConfig {
+    /// Path to the `claude` CLI binary. Defaults to `"claude"` (resolved via `PATH`).
+    ///
+    /// Use this to specify an absolute path when the binary is not on `PATH`,
+    /// or to select a specific version of the CLI.
+    ///
+    /// # Security
+    ///
+    /// No validation is performed on this value. `tokio::process::Command::new()`
+    /// invokes `execvp` directly without a shell, so shell injection is not possible.
+    pub cli_path: Option<String>,
     /// Model to use (`--model`).
     pub model: Option<String>,
     /// System prompt (`--system-prompt`). Defaults to empty string when `None`.
@@ -70,6 +83,12 @@ pub struct ClaudeConfig {
 }
 
 impl ClaudeConfig {
+    /// Returns the CLI binary path, defaulting to `"claude"`.
+    #[must_use]
+    pub fn cli_path_or_default(&self) -> &str {
+        self.cli_path.as_deref().unwrap_or(DEFAULT_CLI_PATH)
+    }
+
     /// Returns a new builder.
     #[must_use]
     pub fn builder() -> ClaudeConfigBuilder {
@@ -80,6 +99,7 @@ impl ClaudeConfig {
     #[must_use]
     pub fn to_builder(&self) -> ClaudeConfigBuilder {
         ClaudeConfigBuilder {
+            cli_path: self.cli_path.clone(),
             model: self.model.clone(),
             system_prompt: self.system_prompt.clone(),
             append_system_prompt: self.append_system_prompt.clone(),
@@ -285,6 +305,7 @@ impl ClaudeConfig {
 /// Builder for [`ClaudeConfig`].
 #[derive(Debug, Clone, Default)]
 pub struct ClaudeConfigBuilder {
+    cli_path: Option<String>,
     model: Option<String>,
     system_prompt: Option<String>,
     append_system_prompt: Option<String>,
@@ -317,6 +338,15 @@ pub struct ClaudeConfigBuilder {
 }
 
 impl ClaudeConfigBuilder {
+    /// Sets the path to the `claude` CLI binary.
+    ///
+    /// When not set, `"claude"` is resolved via `PATH`.
+    #[must_use]
+    pub fn cli_path(mut self, path: impl Into<String>) -> Self {
+        self.cli_path = Some(path.into());
+        self
+    }
+
     /// Sets the model.
     #[must_use]
     pub fn model(mut self, model: impl Into<String>) -> Self {
@@ -575,6 +605,7 @@ impl ClaudeConfigBuilder {
     #[must_use]
     pub fn build(self) -> ClaudeConfig {
         ClaudeConfig {
+            cli_path: self.cli_path,
             model: self.model,
             system_prompt: self.system_prompt,
             append_system_prompt: self.append_system_prompt,
@@ -643,10 +674,31 @@ mod tests {
     #[test]
     fn default_config() {
         let config = ClaudeConfig::default();
+        assert!(config.cli_path.is_none());
         assert!(config.model.is_none());
         assert!(config.system_prompt.is_none());
         assert!(config.max_turns.is_none());
         assert!(config.timeout.is_none());
+    }
+
+    #[test]
+    fn cli_path_or_default_returns_claude_when_none() {
+        let config = ClaudeConfig::default();
+        assert_eq!(config.cli_path_or_default(), "claude");
+    }
+
+    #[test]
+    fn cli_path_or_default_returns_custom_path() {
+        let config = ClaudeConfig::builder()
+            .cli_path("/usr/local/bin/claude-v2")
+            .build();
+        assert_eq!(config.cli_path_or_default(), "/usr/local/bin/claude-v2");
+    }
+
+    #[test]
+    fn builder_sets_cli_path() {
+        let config = ClaudeConfig::builder().cli_path("/opt/claude").build();
+        assert_eq!(config.cli_path.as_deref(), Some("/opt/claude"));
     }
 
     #[test]
@@ -1011,6 +1063,7 @@ mod tests {
     #[test]
     fn to_builder_round_trip_fields() {
         let original = ClaudeConfig::builder()
+            .cli_path("/custom/claude")
             .model("haiku")
             .system_prompt("test")
             .max_turns(5)
@@ -1022,6 +1075,7 @@ mod tests {
 
         let rebuilt = original.to_builder().build();
 
+        assert_eq!(rebuilt.cli_path, original.cli_path);
         assert_eq!(rebuilt.model, original.model);
         assert_eq!(rebuilt.system_prompt, original.system_prompt);
         assert_eq!(rebuilt.max_turns, original.max_turns);

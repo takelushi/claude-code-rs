@@ -208,10 +208,25 @@ let config = claude_code::ClaudeConfig::builder()
 
 ## Documentation
 
+- [Contributing](CONTRIBUTING.md) — Commit conventions, branch policy
 - [Architecture](docs/architecture.md) — Module structure, feature flags, error variants
-- [Releasing](docs/releasing.md) — Release workflow, commit conventions, CI/CD
+- [Releasing](docs/releasing.md) — Release workflow, CI/CD
 - [Testing](docs/testing.md) — Testing strategy
 - [Claude CLI](docs/claude-cli.md) — Observed CLI behaviors and constraints
+
+## Compatibility
+
+Tested against Claude Code CLI **v2.1.92**. Older or newer versions may work but have not been verified.
+
+Not all CLI options have dedicated `ClaudeConfigBuilder` methods. Options not yet supported can be passed via `extra_args`:
+
+```rust
+let config = claude_code::ClaudeConfig::builder()
+    .extra_args(vec!["--agent".into(), "reviewer".into()])
+    .build();
+```
+
+See [docs/claude-cli.md](docs/claude-cli.md) for the full option support status.
 
 ## Minimum Supported Rust Version
 

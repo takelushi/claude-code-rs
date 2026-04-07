@@ -36,6 +36,7 @@ Full command reference: `docs/commands.md`
 - TDD (Explore -> Red -> Green -> Refactor)
 - Must pass `cargo clippy -- -D warnings`
 - Apply `cargo fmt` before committing
+- Follow `CONTRIBUTING.md` for Git/GitHub workflows (commit messages, branch policy, issue references)
 - Write doc comments for all pub API items
 
 ### Documentation Policy

@@ -49,11 +49,31 @@ pub trait CommandRunner: Send + Sync {
 
 /// Runs `claude` via `tokio::process::Command`.
 #[derive(Debug, Clone)]
-pub struct DefaultRunner;
+pub struct DefaultRunner {
+    cli_path: String,
+}
+
+impl DefaultRunner {
+    /// Creates a runner with a custom CLI binary path.
+    #[must_use]
+    pub fn new(cli_path: impl Into<String>) -> Self {
+        Self {
+            cli_path: cli_path.into(),
+        }
+    }
+}
+
+impl Default for DefaultRunner {
+    fn default() -> Self {
+        Self {
+            cli_path: "claude".into(),
+        }
+    }
+}
 
 impl CommandRunner for DefaultRunner {
     async fn run(&self, args: &[String]) -> std::io::Result<Output> {
-        TokioCommand::new("claude").args(args).output().await
+        TokioCommand::new(&self.cli_path).args(args).output().await
     }
 }
 
@@ -85,10 +105,8 @@ impl ClaudeClient {
     /// Creates a new client with the default [`DefaultRunner`].
     #[must_use]
     pub fn new(config: ClaudeConfig) -> Self {
-        Self {
-            config,
-            runner: DefaultRunner,
-        }
+        let runner = DefaultRunner::new(config.cli_path_or_default());
+        Self { config, runner }
     }
 }
 
@@ -118,7 +136,7 @@ impl ClaudeClient {
 
         trace_debug!(args = ?args, "spawning claude CLI stream");
 
-        let mut child = TokioCommand::new("claude")
+        let mut child = TokioCommand::new(self.config.cli_path_or_default())
             .args(&args)
             .stdout(std::process::Stdio::piped())
             .stderr(std::process::Stdio::piped())
@@ -281,6 +299,7 @@ impl<R: CommandRunner + Clone> ClaudeClient<R> {
 /// Checks that the `claude` CLI is available and returns its version string.
 ///
 /// Runs `claude --version` and returns the trimmed stdout on success.
+/// To check a binary at a custom path, use [`check_cli_with_path`].
 ///
 /// # Errors
 ///
@@ -288,7 +307,20 @@ impl<R: CommandRunner + Clone> ClaudeClient<R> {
 /// - [`ClaudeError::NonZeroExit`] if the command fails.
 /// - [`ClaudeError::Io`] for other I/O errors.
 pub async fn check_cli() -> Result<String, ClaudeError> {
-    let output = TokioCommand::new("claude")
+    check_cli_with_path("claude").await
+}
+
+/// Checks that the CLI at the given path is available and returns its version string.
+///
+/// Runs `<cli_path> --version` and returns the trimmed stdout on success.
+///
+/// # Errors
+///
+/// - [`ClaudeError::CliNotFound`] if the binary is not found.
+/// - [`ClaudeError::NonZeroExit`] if the command fails.
+/// - [`ClaudeError::Io`] for other I/O errors.
+pub async fn check_cli_with_path(cli_path: &str) -> Result<String, ClaudeError> {
+    let output = TokioCommand::new(cli_path)
         .arg("--version")
         .output()
         .await
@@ -507,5 +539,24 @@ mod tests {
             .await
             .unwrap_err();
         assert!(matches!(err, ClaudeError::NonZeroExit { code: 1, .. }));
+    }
+
+    /// Verifies that shell metacharacters in `cli_path` are not interpreted.
+    ///
+    /// `Command::new()` uses `execvp` directly (no shell), so a path like
+    /// `"claude; echo pwned"` is treated as a literal filename lookup and
+    /// fails with `NotFound` — not as a shell command.
+    #[tokio::test]
+    async fn cli_path_with_shell_metacharacters_is_not_interpreted() {
+        let malicious = "claude; echo pwned";
+        let err = check_cli_with_path(malicious).await.unwrap_err();
+        assert!(matches!(err, ClaudeError::CliNotFound));
+    }
+
+    #[tokio::test]
+    async fn cli_path_with_command_substitution_is_not_interpreted() {
+        let malicious = "$(echo claude)";
+        let err = check_cli_with_path(malicious).await.unwrap_err();
+        assert!(matches!(err, ClaudeError::CliNotFound));
     }
 }

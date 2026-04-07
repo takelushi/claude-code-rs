@@ -10,7 +10,8 @@ Releases are automated via [release-please](https://github.com/googleapis/releas
 
 ## Commit message format
 
-release-please uses commit messages to determine version bumps:
+This project uses [Conventional Commits](../CONTRIBUTING.md#commit-message-format).
+release-please uses commit prefixes to determine version bumps:
 
 | Prefix | Version bump | Example |
 |--------|-------------|---------|
@@ -23,6 +24,10 @@ While the crate is pre-1.0, `release-please-config.json` is configured with:
 - `bump-minor-pre-major: true` — breaking changes bump minor, not major
 - `bump-patch-for-minor-pre-major: true` — features bump patch, not minor
 
+## Branch policy
+
+See [CONTRIBUTING.md](../CONTRIBUTING.md#branch-policy). Only `develop` → `main` merges are allowed.
+
 ## Branch protection
 
 `main` branch requires the following status checks to pass:
@@ -31,6 +36,7 @@ While the crate is pre-1.0, `release-please-config.json` is configured with:
 - Clippy (all-features)
 - Rustfmt
 - Publish dry-run
+- Source branch check
 
 Configured via GitHub API. Admin enforcement is enabled.
 

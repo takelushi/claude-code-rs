@@ -29,6 +29,13 @@
 #![cfg_attr(docsrs, feature(doc_cfg))]
 #![warn(missing_docs)]
 
+/// The Claude Code CLI version that this library was tested against.
+///
+/// This does not guarantee compatibility with this exact version only;
+/// it indicates the version used during development and testing.
+/// Older or newer CLI versions may work but have not been verified.
+pub const TESTED_CLI_VERSION: &str = "2.1.92";
+
 mod client;
 mod config;
 mod conversation;
@@ -39,7 +46,7 @@ mod stream;
 mod structured;
 mod types;
 
-pub use client::{ClaudeClient, CommandRunner, DefaultRunner, check_cli};
+pub use client::{ClaudeClient, CommandRunner, DefaultRunner, check_cli, check_cli_with_path};
 pub use config::{ClaudeConfig, ClaudeConfigBuilder, effort, permission_mode};
 pub use conversation::Conversation;
 pub use error::ClaudeError;
