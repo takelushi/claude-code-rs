@@ -34,6 +34,18 @@ tracing = ["dep:tracing"]                           # debug/error/info logging i
 - `StreamEvent` is defined in the `stream.rs` module (gated by `stream` feature)
 - tracing is absorbed via conditional macros (`trace_debug!` etc.) in `client.rs`
 
+## Security Considerations
+
+### `cli_path` — no input validation
+
+`ClaudeConfig::cli_path` accepts arbitrary strings without validation.
+This is safe because `tokio::process::Command::new()` calls `execvp` directly
+without invoking a shell. Shell metacharacters (`;`, `&&`, `$()`, backticks, etc.)
+are treated as literal parts of the executable name and cannot trigger injection.
+Arguments are likewise passed via `args()`, not string concatenation.
+Path existence is validated at execution time by the OS; a missing binary
+produces `ClaudeError::CliNotFound`.
+
 ## Error Variants
 
 `ClaudeError` variants:
