@@ -50,6 +50,7 @@ Full command reference: `docs/commands.md`
 - Architecture, feature flags, and error variants are documented in `docs/architecture.md`
 - Testing strategy details are documented in `docs/testing.md`
 - Release workflow, commit conventions, and CI/CD setup are documented in `docs/releasing.md`
+- Do not commit AI-generated ephemeral artifacts (e.g., superpowers plans, design specs) to the repository
 
 ### Conventions
 
