@@ -210,7 +210,26 @@ The following options are injected automatically by the library. Do not pass the
 
 ## Updating for New CLI Versions
 
-Checklist for maintainers when a new Claude CLI version is released:
+### Automated workflow
+
+The `cli-version-check.yml` workflow runs weekly (Monday 00:00 UTC) and detects new Claude CLI releases via the npm registry. When a new version is found it:
+
+1. Runs `cargo test` and `cargo clippy` — on failure, `claude-code-action` creates a fix PR
+2. Diffs `claude --help` output against `.claude-cli-help-output` — on changes, `claude-code-action` creates PRs for option changes and/or documentation updates
+3. Creates a version bump PR updating `.claude-cli-version` and `.claude-cli-help-output`
+
+All PRs target `develop`. The workflow uses Max plan authentication (`CLAUDE_CODE_OAUTH_TOKEN`).
+
+Tracked files in the repository root:
+
+| File | Purpose |
+| --- | --- |
+| `.claude-cli-version` | Last checked CLI version |
+| `.claude-cli-help-output` | Last captured `claude --help` output for diffing |
+
+### Manual checklist
+
+For maintainers reviewing automated PRs or updating manually:
 
 1. Run `claude --version` and `claude --help` to identify changes
 2. Compare `--help` output against the option support status tables above
