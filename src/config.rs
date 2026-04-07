@@ -187,7 +187,6 @@ impl ClaudeConfig {
     fn base_args(&self) -> Vec<String> {
         let mut args = self.preset_args();
         self.push_builder_attrs(&mut args);
-        args.extend(self.extra_args.iter().cloned());
         args
     }
 
@@ -410,6 +409,7 @@ impl ClaudeConfig {
         let mut args = self.base_args();
         args.push("--output-format".into());
         args.push("json".into());
+        args.extend(self.extra_args.iter().cloned());
         args.push(prompt.into());
         args
     }
@@ -424,11 +424,10 @@ impl ClaudeConfig {
         args.push("--output-format".into());
         args.push("stream-json".into());
         args.push("--verbose".into());
-
         if self.include_partial_messages == Some(true) {
             args.push("--include-partial-messages".into());
         }
-
+        args.extend(self.extra_args.iter().cloned());
         args.push(prompt.into());
         args
     }
@@ -1348,5 +1347,65 @@ mod tests {
 
         let idx = args.iter().position(|a| a == "--system-prompt").unwrap();
         assert_eq!(args[idx + 1], "Be helpful");
+    }
+
+    #[test]
+    fn bare_preset_to_args() {
+        let config = ClaudeConfig::builder().preset(Preset::Bare).build();
+        let args = config.to_args("test");
+
+        // Only --output-format json and prompt
+        assert!(args.contains(&"--output-format".to_string()));
+        assert!(args.contains(&"json".to_string()));
+        assert_eq!(args.last().unwrap(), "test");
+
+        // No preset flags at all
+        assert!(!args.contains(&"--print".to_string()));
+        assert!(!args.contains(&"--no-session-persistence".to_string()));
+        assert!(!args.contains(&"--strict-mcp-config".to_string()));
+        assert!(!args.contains(&"--disable-slash-commands".to_string()));
+        assert!(!args.contains(&"--setting-sources".to_string()));
+        assert!(!args.contains(&"--mcp-config".to_string()));
+        assert!(!args.contains(&"--tools".to_string()));
+        assert!(!args.contains(&"--system-prompt".to_string()));
+    }
+
+    #[test]
+    fn bare_preset_to_stream_args() {
+        let config = ClaudeConfig::builder().preset(Preset::Bare).build();
+        let args = config.to_stream_args("test");
+
+        assert!(args.contains(&"--output-format".to_string()));
+        assert!(args.contains(&"stream-json".to_string()));
+        assert!(args.contains(&"--verbose".to_string()));
+        assert_eq!(args.last().unwrap(), "test");
+
+        assert!(!args.contains(&"--print".to_string()));
+    }
+
+    #[test]
+    fn bare_preset_with_extra_args() {
+        let config = ClaudeConfig::builder()
+            .preset(Preset::Bare)
+            .extra_args(["--print", "--cli-mode"])
+            .build();
+        let args = config.to_args("test");
+
+        assert!(args.contains(&"--print".to_string()));
+        assert!(args.contains(&"--cli-mode".to_string()));
+    }
+
+    #[test]
+    fn extra_args_after_format() {
+        let config = ClaudeConfig::builder()
+            .preset(Preset::Bare)
+            .extra_args(["--new-flag"])
+            .build();
+        let args = config.to_args("test");
+
+        // extra_args should appear after --output-format (for last-wins override)
+        let format_idx = args.iter().position(|a| a == "--output-format").unwrap();
+        let flag_idx = args.iter().position(|a| a == "--new-flag").unwrap();
+        assert!(flag_idx > format_idx);
     }
 }
