@@ -216,7 +216,7 @@ let config = claude_code::ClaudeConfig::builder()
 
 ## Compatibility
 
-Tested against Claude Code CLI **v2.1.92**. Older or newer versions may work but have not been verified.
+Tested against Claude Code CLI <!-- cli-version -->**v2.1.92**<!-- /cli-version -->. Older or newer versions may work but have not been verified.
 
 Not all CLI options have dedicated `ClaudeConfigBuilder` methods. Options not yet supported can be passed via `extra_args`:
 

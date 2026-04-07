@@ -2,15 +2,6 @@
 
 Notes on Claude Code CLI behaviors and constraints discovered during implementation.
 
-## Tested CLI Version
-
-| Item | Value |
-| --- | --- |
-| CLI version | 2.1.92 |
-| Verified on | 2026-04-07 |
-
-This is the version used during development and testing. The library may work with other versions but they have not been verified.
-
 ## ANSI Escape Sequence Contamination
 
 ANSI escape sequences (e.g., `\x1b[?1004l`) may appear in stdout when using `--output-format json` / `stream-json`. These must be stripped before JSON parsing.
@@ -216,7 +207,7 @@ The `cli-version-check.yml` workflow runs weekly (Monday 00:00 UTC) and detects 
 
 1. Runs `cargo test` and `cargo clippy` — on failure, `claude-code-action` creates a fix PR
 2. Diffs `claude --help` output against `.claude-cli-help-output` — on changes, `claude-code-action` creates PRs for option changes and/or documentation updates
-3. Creates a version bump PR updating `.claude-cli-version` and `.claude-cli-help-output`
+3. Creates a version bump PR updating `.claude-cli-version`, `.claude-cli-help-output`, `TESTED_CLI_VERSION` in `src/lib.rs`, and `README.md`
 
 All PRs target `develop`. The workflow uses Max plan authentication (`CLAUDE_CODE_OAUTH_TOKEN`).
 
@@ -235,8 +226,5 @@ For maintainers reviewing automated PRs or updating manually:
 2. Compare `--help` output against the option support status tables above
 3. Categorize new options into Supported, Known Unsupported, or Interactive-Only
 4. Run `cargo test` to check for regressions in output parsing
-5. Update the tested version and date in:
-   - `src/lib.rs` (`TESTED_CLI_VERSION` constant)
-   - `README.md` (Compatibility section)
-   - This file (Tested CLI Version table)
+5. Version files are updated automatically by the version bump PR (`src/lib.rs`, `README.md`, `.claude-cli-version`, `.claude-cli-help-output`)
 6. If the output format (`--output-format json` / `stream-json`) has changed, update types in `src/types.rs` and `src/stream.rs`

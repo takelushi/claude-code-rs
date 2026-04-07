@@ -229,8 +229,11 @@ jobs:
 
       - name: Update version files
         run: |
-          echo "${{ needs.detect-version.outputs.new_version }}" > .claude-cli-version
+          NEW_VERSION="${{ needs.detect-version.outputs.new_version }}"
+          echo "$NEW_VERSION" > .claude-cli-version
           claude --help 2>/dev/null | sed 's/\x1b\[[^a-zA-Z]*[a-zA-Z]//g' > .claude-cli-help-output
+          sed -i "s/TESTED_CLI_VERSION: &str = \".*\"/TESTED_CLI_VERSION: \&str = \"$NEW_VERSION\"/" src/lib.rs
+          sed -i "s/<!-- cli-version -->.*<!-- \/cli-version -->/<!-- cli-version -->**v$NEW_VERSION**<!-- \/cli-version -->/" README.md
 
       - name: Create PR
         env:
@@ -247,7 +250,7 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git checkout -b "$BRANCH"
-          git add .claude-cli-version .claude-cli-help-output
+          git add .claude-cli-version .claude-cli-help-output src/lib.rs README.md
           git commit -m "chore: bump tracked CLI version to ${{ needs.detect-version.outputs.new_version }}"
           git push origin "$BRANCH"
 
@@ -260,6 +263,8 @@ jobs:
 
           - Update `.claude-cli-version` to ${{ needs.detect-version.outputs.new_version }}
           - Update `.claude-cli-help-output` with new `--help` output
+          - Update `TESTED_CLI_VERSION` in `src/lib.rs`
+          - Update version in `README.md`
 
           > **Note:** If `test-fix` or `option-changes` PRs exist for this version, merge them before this PR.
 
