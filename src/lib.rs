@@ -47,7 +47,7 @@ mod structured;
 mod types;
 
 pub use client::{ClaudeClient, CommandRunner, DefaultRunner, check_cli, check_cli_with_path};
-pub use config::{ClaudeConfig, ClaudeConfigBuilder, effort, permission_mode};
+pub use config::{ClaudeConfig, ClaudeConfigBuilder, Preset, effort, permission_mode};
 pub use conversation::Conversation;
 pub use error::ClaudeError;
 #[cfg(feature = "stream")]
