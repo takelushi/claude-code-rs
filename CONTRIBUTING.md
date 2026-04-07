@@ -50,6 +50,10 @@ hotfix/*  ──→ develop ──→ main
 
 This is enforced by CI (`enforce-branch-policy.yml`) and branch protection rules on `main`.
 
+### PR title for develop → main merges
+
+Use `chore: merge develop into main` as the PR title. Since these PRs bundle multiple change types (feat, fix, docs, ci, etc.), `chore` is the appropriate prefix.
+
 ## Development
 
 See [CLAUDE.md](CLAUDE.md) for build commands, testing strategy, and code conventions.
