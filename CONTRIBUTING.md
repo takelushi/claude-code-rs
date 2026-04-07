@@ -29,14 +29,17 @@ This project follows [Conventional Commits](https://www.conventionalcommits.org/
 When a commit is related to a GitHub issue:
 
 - Add `(#N)` to the subject line for traceability
-- Add `Closes #N` in the footer to auto-close the issue when merged to `main`
+- Use `Refs #N` in commit footers or PR bodies to link without closing (for all work on `develop`)
+- Use `Closes #N` in **`develop` → `main`** PR bodies to auto-close on merge
+
+This two-step approach ensures issues are visibly linked from the start, while only closing when changes reach `main`.
 
 ```
 feat: add cli_path option (#5)
 
 Allow users to specify a custom path to the claude CLI binary.
 
-Closes #5
+Refs #5
 ```
 
 ## Branch policy
