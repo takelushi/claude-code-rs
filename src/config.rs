@@ -1,5 +1,13 @@
 use std::time::Duration;
 
+/// Conditional tracing macro for warnings.
+macro_rules! trace_warn {
+    ($($arg:tt)*) => {
+        #[cfg(feature = "tracing")]
+        tracing::warn!($($arg)*);
+    };
+}
+
 /// Default CLI command name.
 const DEFAULT_CLI_PATH: &str = "claude";
 
@@ -410,6 +418,7 @@ impl ClaudeConfig {
         args.push("--output-format".into());
         args.push("json".into());
         args.extend(self.extra_args.iter().cloned());
+        self.warn_if_no_print(&args);
         args.push(prompt.into());
         args
     }
@@ -428,8 +437,18 @@ impl ClaudeConfig {
             args.push("--include-partial-messages".into());
         }
         args.extend(self.extra_args.iter().cloned());
+        self.warn_if_no_print(&args);
         args.push(prompt.into());
         args
+    }
+
+    /// Emits a tracing warning if `--print` / `-p` is not in the final args.
+    fn warn_if_no_print(&self, args: &[String]) {
+        if !args.iter().any(|a| a == "--print" || a == "-p") {
+            trace_warn!(
+                "args do not contain --print; the CLI may start in interactive mode and hang"
+            );
+        }
     }
 }
 
@@ -1603,5 +1622,56 @@ mod tests {
         assert!(!args.contains(&"--no-session-persistence".to_string()));
         assert!(!args.contains(&"--strict-mcp-config".to_string()));
         assert!(!args.contains(&"--disable-slash-commands".to_string()));
+    }
+
+    // --- Hang protection: --print presence tests ---
+
+    #[test]
+    fn normal_preset_contains_print() {
+        let config = ClaudeConfig::builder().preset(Preset::Normal).build();
+        let args = config.to_args("test");
+        assert!(args.contains(&"--print".to_string()));
+    }
+
+    #[test]
+    fn minimal_preset_contains_print() {
+        let config = ClaudeConfig::builder().preset(Preset::Minimal).build();
+        let args = config.to_args("test");
+        assert!(args.contains(&"--print".to_string()));
+    }
+
+    #[test]
+    fn bare_preset_no_print() {
+        let config = ClaudeConfig::builder().preset(Preset::Bare).build();
+        let args = config.to_args("test");
+        assert!(!args.contains(&"--print".to_string()));
+    }
+
+    #[test]
+    fn bare_preset_with_print_in_extra_args() {
+        let config = ClaudeConfig::builder()
+            .preset(Preset::Bare)
+            .extra_args(["-p"])
+            .build();
+        let args = config.to_args("test");
+        assert!(args.contains(&"-p".to_string()));
+    }
+
+    #[test]
+    fn custom_preset_without_print() {
+        let config = ClaudeConfig::builder()
+            .preset(Preset::Custom(vec!["--no-session-persistence".into()]))
+            .build();
+        let args = config.to_args("test");
+        assert!(!args.contains(&"--print".to_string()));
+    }
+
+    #[test]
+    fn warn_if_no_print_does_not_panic() {
+        // Verify warn_if_no_print doesn't panic or cause issues
+        // when --print is absent (Bare preset)
+        let config = ClaudeConfig::builder().preset(Preset::Bare).build();
+        let _args = config.to_args("test");
+        let _stream_args = config.to_stream_args("test");
     }
 }

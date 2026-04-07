@@ -138,6 +138,7 @@ impl ClaudeClient {
 
         let mut child = TokioCommand::new(self.config.cli_path_or_default())
             .args(&args)
+            .stdin(std::process::Stdio::null())
             .stdout(std::process::Stdio::piped())
             .stderr(std::process::Stdio::piped())
             .spawn()
