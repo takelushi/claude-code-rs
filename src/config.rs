@@ -1288,4 +1288,65 @@ mod tests {
         let rebuilt = config.to_builder().build();
         assert_eq!(rebuilt.preset, Preset::Minimal);
     }
+
+    #[test]
+    fn minimal_preset_to_args() {
+        let config = ClaudeConfig::builder().preset(Preset::Minimal).build();
+        let args = config.to_args("test");
+
+        assert!(args.contains(&"--print".to_string()));
+        assert!(args.contains(&"--output-format".to_string()));
+        assert!(args.contains(&"json".to_string()));
+        assert_eq!(args.last().unwrap(), "test");
+
+        // Context-minimization flags must NOT be present
+        assert!(!args.contains(&"--no-session-persistence".to_string()));
+        assert!(!args.contains(&"--strict-mcp-config".to_string()));
+        assert!(!args.contains(&"--disable-slash-commands".to_string()));
+        assert!(!args.contains(&"--setting-sources".to_string()));
+        assert!(!args.contains(&"--mcp-config".to_string()));
+        assert!(!args.contains(&"--tools".to_string()));
+        assert!(!args.contains(&"--system-prompt".to_string()));
+    }
+
+    #[test]
+    fn minimal_preset_to_stream_args() {
+        let config = ClaudeConfig::builder().preset(Preset::Minimal).build();
+        let args = config.to_stream_args("test");
+
+        assert!(args.contains(&"--print".to_string()));
+        assert!(args.contains(&"--output-format".to_string()));
+        assert!(args.contains(&"stream-json".to_string()));
+        assert!(args.contains(&"--verbose".to_string()));
+        assert_eq!(args.last().unwrap(), "test");
+
+        assert!(!args.contains(&"--no-session-persistence".to_string()));
+        assert!(!args.contains(&"--system-prompt".to_string()));
+    }
+
+    #[test]
+    fn minimal_preset_with_builder_add() {
+        let config = ClaudeConfig::builder()
+            .preset(Preset::Minimal)
+            .no_session_persistence(true)
+            .model("haiku")
+            .build();
+        let args = config.to_args("test");
+
+        assert!(args.contains(&"--print".to_string()));
+        assert!(args.contains(&"--no-session-persistence".to_string()));
+        assert!(args.contains(&"--model".to_string()));
+    }
+
+    #[test]
+    fn minimal_preset_with_system_prompt() {
+        let config = ClaudeConfig::builder()
+            .preset(Preset::Minimal)
+            .system_prompt("Be helpful")
+            .build();
+        let args = config.to_args("test");
+
+        let idx = args.iter().position(|a| a == "--system-prompt").unwrap();
+        assert_eq!(args[idx + 1], "Be helpful");
+    }
 }
