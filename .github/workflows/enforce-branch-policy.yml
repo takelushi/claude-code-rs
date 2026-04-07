@@ -9,9 +9,12 @@ jobs:
     name: Source branch check
     runs-on: ubuntu-latest
     steps:
-      - name: Verify PR is from develop
+      - name: Verify PR is from develop or release-please
         run: |
-          if [ "${{ github.head_ref }}" != "develop" ]; then
-            echo "::error::PRs to main must come from the develop branch. Got: ${{ github.head_ref }}"
+          HEAD="${{ github.head_ref }}"
+          if [ "$HEAD" = "develop" ] || [[ "$HEAD" == release-please--* ]]; then
+            echo "Allowed source branch: $HEAD"
+          else
+            echo "::error::PRs to main must come from develop or release-please. Got: $HEAD"
             exit 1
           fi
