@@ -10,7 +10,8 @@ Releases are automated via [release-please](https://github.com/googleapis/releas
 
 ## Commit message format
 
-release-please uses commit messages to determine version bumps:
+This project uses [Conventional Commits](../CONTRIBUTING.md#commit-message-format).
+release-please uses commit prefixes to determine version bumps:
 
 | Prefix | Version bump | Example |
 |--------|-------------|---------|
@@ -25,16 +26,7 @@ While the crate is pre-1.0, `release-please-config.json` is configured with:
 
 ## Branch policy
 
-**Only `develop` → `main` merges are allowed.** All feature branches and fixes must go through `develop` first.
-
-```
-feature/* ──→ develop ──→ main
-hotfix/*  ──→ develop ──→ main
-```
-
-This is enforced by:
-- `enforce-branch-policy.yml` — CI job that fails PRs to `main` from non-`develop` branches
-- `Source branch check` — required status check on `main` branch protection
+See [CONTRIBUTING.md](../CONTRIBUTING.md#branch-policy). Only `develop` → `main` merges are allowed.
 
 ## Branch protection
 

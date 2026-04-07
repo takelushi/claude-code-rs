@@ -208,8 +208,9 @@ let config = claude_code::ClaudeConfig::builder()
 
 ## Documentation
 
+- [Contributing](CONTRIBUTING.md) — Commit conventions, branch policy
 - [Architecture](docs/architecture.md) — Module structure, feature flags, error variants
-- [Releasing](docs/releasing.md) — Release workflow, commit conventions, CI/CD
+- [Releasing](docs/releasing.md) — Release workflow, CI/CD
 - [Testing](docs/testing.md) — Testing strategy
 - [Claude CLI](docs/claude-cli.md) — Observed CLI behaviors and constraints
 
