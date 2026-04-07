@@ -48,6 +48,7 @@ Full command reference: `docs/commands.md`
 - Record observed Claude CLI behaviors and constraints in `docs/claude-cli.md`
 - Architecture, feature flags, and error variants are documented in `docs/architecture.md`
 - Testing strategy details are documented in `docs/testing.md`
+- Release workflow, commit conventions, and CI/CD setup are documented in `docs/releasing.md`
 
 ### Conventions
 

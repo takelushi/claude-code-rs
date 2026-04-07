@@ -206,6 +206,13 @@ let config = claude_code::ClaudeConfig::builder()
     .build();
 ```
 
+## Documentation
+
+- [Architecture](docs/architecture.md) — Module structure, feature flags, error variants
+- [Releasing](docs/releasing.md) — Release workflow, commit conventions, CI/CD
+- [Testing](docs/testing.md) — Testing strategy
+- [Claude CLI](docs/claude-cli.md) — Observed CLI behaviors and constraints
+
 ## Minimum Supported Rust Version
 
 Rust 1.93+ (edition 2024).
