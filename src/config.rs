@@ -1408,4 +1408,200 @@ mod tests {
         let flag_idx = args.iter().position(|a| a == "--new-flag").unwrap();
         assert!(flag_idx > format_idx);
     }
+
+    // --- Custom preset tests ---
+
+    #[test]
+    fn custom_preset_to_args() {
+        let config = ClaudeConfig::builder()
+            .preset(Preset::Custom(vec![
+                "--print".into(),
+                "--no-session-persistence".into(),
+            ]))
+            .build();
+        let args = config.to_args("test");
+
+        assert!(args.contains(&"--print".to_string()));
+        assert!(args.contains(&"--no-session-persistence".to_string()));
+        assert!(args.contains(&"--output-format".to_string()));
+        assert_eq!(args.last().unwrap(), "test");
+
+        // Flags NOT in the custom preset should be absent
+        assert!(!args.contains(&"--strict-mcp-config".to_string()));
+        assert!(!args.contains(&"--disable-slash-commands".to_string()));
+    }
+
+    #[test]
+    fn custom_preset_is_reusable() {
+        let preset = Preset::Custom(vec!["--print".into(), "--no-session-persistence".into()]);
+
+        let config1 = ClaudeConfig::builder()
+            .preset(preset.clone())
+            .model("haiku")
+            .build();
+        let config2 = ClaudeConfig::builder()
+            .preset(preset)
+            .model("sonnet")
+            .build();
+
+        let args1 = config1.to_args("test");
+        let args2 = config2.to_args("test");
+
+        // Both should have the preset flags
+        assert!(args1.contains(&"--print".to_string()));
+        assert!(args2.contains(&"--print".to_string()));
+        assert!(args1.contains(&"--no-session-persistence".to_string()));
+        assert!(args2.contains(&"--no-session-persistence".to_string()));
+    }
+
+    #[test]
+    fn custom_preset_builder_override_remove() {
+        let config = ClaudeConfig::builder()
+            .preset(Preset::Custom(vec![
+                "--print".into(),
+                "--no-session-persistence".into(),
+            ]))
+            .no_session_persistence(false) // remove from custom preset
+            .build();
+        let args = config.to_args("test");
+
+        assert!(args.contains(&"--print".to_string()));
+        assert!(!args.contains(&"--no-session-persistence".to_string()));
+    }
+
+    #[test]
+    fn custom_preset_builder_override_remove_strict_mcp() {
+        let config = ClaudeConfig::builder()
+            .preset(Preset::Custom(vec![
+                "--print".into(),
+                "--strict-mcp-config".into(),
+            ]))
+            .strict_mcp_config(false)
+            .build();
+        let args = config.to_args("test");
+
+        assert!(!args.contains(&"--strict-mcp-config".to_string()));
+    }
+
+    #[test]
+    fn custom_preset_builder_override_remove_disable_slash_commands() {
+        let config = ClaudeConfig::builder()
+            .preset(Preset::Custom(vec![
+                "--print".into(),
+                "--disable-slash-commands".into(),
+            ]))
+            .disable_slash_commands(false)
+            .build();
+        let args = config.to_args("test");
+
+        assert!(!args.contains(&"--disable-slash-commands".to_string()));
+    }
+
+    // --- Priority override tests ---
+
+    #[test]
+    fn priority_extra_args_appended_last() {
+        let config = ClaudeConfig::builder()
+            .preset(Preset::Normal)
+            .extra_args(["--new-flag"])
+            .build();
+        let args = config.to_args("test");
+
+        let prompt_idx = args.iter().position(|a| a == "test").unwrap();
+        let flag_idx = args.iter().position(|a| a == "--new-flag").unwrap();
+        assert!(flag_idx < prompt_idx);
+        assert!(flag_idx > 0); // not the first arg
+    }
+
+    #[test]
+    fn priority_extra_args_overrides_format() {
+        let config = ClaudeConfig::builder()
+            .preset(Preset::Normal)
+            .extra_args(["--output-format", "new"])
+            .build();
+        let args = config.to_args("test");
+
+        // Both the library-injected and user-specified --output-format present
+        let format_positions: Vec<_> = args
+            .iter()
+            .enumerate()
+            .filter(|(_, a)| a.as_str() == "--output-format")
+            .map(|(i, _)| i)
+            .collect();
+        assert_eq!(format_positions.len(), 2);
+        // User-specified comes after library-injected
+        assert!(format_positions[1] > format_positions[0]);
+    }
+
+    #[test]
+    fn priority_full_stack() {
+        let config = ClaudeConfig::builder()
+            .preset(Preset::Minimal)
+            .model("haiku")
+            .extra_args(["--model", "sonnet"])
+            .build();
+        let args = config.to_args("test");
+
+        // Both --model values present
+        let model_positions: Vec<_> = args
+            .iter()
+            .enumerate()
+            .filter(|(_, a)| a.as_str() == "--model")
+            .map(|(i, _)| i)
+            .collect();
+        assert_eq!(model_positions.len(), 2);
+        // haiku (builder attr) before sonnet (extra_args)
+        assert_eq!(args[model_positions[0] + 1], "haiku");
+        assert_eq!(args[model_positions[1] + 1], "sonnet");
+    }
+
+    // --- Boolean flag override tests ---
+
+    #[test]
+    fn bool_flag_none_follows_normal_preset() {
+        // Normal includes these flags by default when None
+        let config = ClaudeConfig::builder().preset(Preset::Normal).build();
+        let args = config.to_args("test");
+        assert!(args.contains(&"--no-session-persistence".to_string()));
+        assert!(args.contains(&"--strict-mcp-config".to_string()));
+        assert!(args.contains(&"--disable-slash-commands".to_string()));
+    }
+
+    #[test]
+    fn bool_flag_none_follows_minimal_preset() {
+        // Minimal does NOT include these flags when None
+        let config = ClaudeConfig::builder().preset(Preset::Minimal).build();
+        let args = config.to_args("test");
+        assert!(!args.contains(&"--no-session-persistence".to_string()));
+        assert!(!args.contains(&"--strict-mcp-config".to_string()));
+        assert!(!args.contains(&"--disable-slash-commands".to_string()));
+    }
+
+    #[test]
+    fn bool_flag_true_adds_to_minimal() {
+        let config = ClaudeConfig::builder()
+            .preset(Preset::Minimal)
+            .no_session_persistence(true)
+            .strict_mcp_config(true)
+            .disable_slash_commands(true)
+            .build();
+        let args = config.to_args("test");
+        assert!(args.contains(&"--no-session-persistence".to_string()));
+        assert!(args.contains(&"--strict-mcp-config".to_string()));
+        assert!(args.contains(&"--disable-slash-commands".to_string()));
+    }
+
+    #[test]
+    fn bool_flag_false_removes_from_normal() {
+        let config = ClaudeConfig::builder()
+            .preset(Preset::Normal)
+            .no_session_persistence(false)
+            .strict_mcp_config(false)
+            .disable_slash_commands(false)
+            .build();
+        let args = config.to_args("test");
+        assert!(!args.contains(&"--no-session-persistence".to_string()));
+        assert!(!args.contains(&"--strict-mcp-config".to_string()));
+        assert!(!args.contains(&"--disable-slash-commands".to_string()));
+    }
 }
