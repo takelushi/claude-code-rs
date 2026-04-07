@@ -261,10 +261,10 @@ impl ClaudeConfig {
             .iter()
             .filter(|arg| {
                 let s = arg.as_str();
-                !(self.no_session_persistence == Some(false) && s == "--no-session-persistence"
-                    || self.strict_mcp_config == Some(false) && s == "--strict-mcp-config"
-                    || self.disable_slash_commands == Some(false)
-                        && s == "--disable-slash-commands")
+                !((self.no_session_persistence == Some(false) && s == "--no-session-persistence")
+                    || (self.strict_mcp_config == Some(false) && s == "--strict-mcp-config")
+                    || (self.disable_slash_commands == Some(false)
+                        && s == "--disable-slash-commands"))
             })
             .cloned()
             .collect()
