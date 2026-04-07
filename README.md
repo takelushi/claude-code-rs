@@ -161,10 +161,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 }
 ```
 
-Requires the `structured` feature (enabled by default). Add `schemars` to your dependencies:
+Requires the `structured` feature. Add it to your dependencies:
 
 ```toml
 [dependencies]
+claude-code = { version = "0.1", features = ["structured"] }
 schemars = "1"
 ```
 
@@ -173,10 +174,10 @@ schemars = "1"
 | Feature | Default | Description |
 |---|---|---|
 | `stream` | Yes | Enables `ask_stream`, `StreamEvent`, and `Conversation` stream methods. Adds `tokio-stream` and `async-stream` dependencies. |
-| `structured` | Yes | Enables `generate_schema` helper for JSON Schema generation. Adds `schemars` dependency. |
+| `structured` | No | Enables `generate_schema` helper for JSON Schema generation. Adds `schemars` dependency. |
 | `tracing` | Yes | Enables debug/error/info logging via `tracing`. Adds `tracing` dependency. |
 
-To use a minimal configuration (only `ask()` and `ask_structured()`):
+To use a minimal configuration (only `ask()`):
 
 ```toml
 [dependencies]

@@ -5,7 +5,7 @@ use std::io;
 #[non_exhaustive]
 pub enum ClaudeError {
     /// `claude` command not found in PATH.
-    #[error("claude CLI not found in PATH")]
+    #[error("claude CLI not found in PATH. Install it from https://docs.anthropic.com/en/docs/claude-code")]
     CliNotFound,
 
     /// CLI exited with a non-zero status code.
@@ -47,7 +47,10 @@ mod tests {
     #[test]
     fn cli_not_found_message() {
         let err = ClaudeError::CliNotFound;
-        assert_eq!(err.to_string(), "claude CLI not found in PATH");
+        assert_eq!(
+            err.to_string(),
+            "claude CLI not found in PATH. Install it from https://docs.anthropic.com/en/docs/claude-code"
+        );
     }
 
     #[test]
