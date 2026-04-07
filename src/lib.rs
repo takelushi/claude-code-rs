@@ -29,6 +29,13 @@
 #![cfg_attr(docsrs, feature(doc_cfg))]
 #![warn(missing_docs)]
 
+/// The Claude Code CLI version that this library was tested against.
+///
+/// This does not guarantee compatibility with this exact version only;
+/// it indicates the version used during development and testing.
+/// Older or newer CLI versions may work but have not been verified.
+pub const TESTED_CLI_VERSION: &str = "2.1.92";
+
 mod client;
 mod config;
 mod conversation;

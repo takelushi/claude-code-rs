@@ -214,6 +214,20 @@ let config = claude_code::ClaudeConfig::builder()
 - [Testing](docs/testing.md) — Testing strategy
 - [Claude CLI](docs/claude-cli.md) — Observed CLI behaviors and constraints
 
+## Compatibility
+
+Tested against Claude Code CLI **v2.1.92**. Older or newer versions may work but have not been verified.
+
+Not all CLI options have dedicated `ClaudeConfigBuilder` methods. Options not yet supported can be passed via `extra_args`:
+
+```rust
+let config = claude_code::ClaudeConfig::builder()
+    .extra_args(vec!["--agent".into(), "reviewer".into()])
+    .build();
+```
+
+See [docs/claude-cli.md](docs/claude-cli.md) for the full option support status.
+
 ## Minimum Supported Rust Version
 
 Rust 1.93+ (edition 2024).
