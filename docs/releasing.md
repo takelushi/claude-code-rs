@@ -23,6 +23,19 @@ While the crate is pre-1.0, `release-please-config.json` is configured with:
 - `bump-minor-pre-major: true` — breaking changes bump minor, not major
 - `bump-patch-for-minor-pre-major: true` — features bump patch, not minor
 
+## Branch policy
+
+**Only `develop` → `main` merges are allowed.** All feature branches and fixes must go through `develop` first.
+
+```
+feature/* ──→ develop ──→ main
+hotfix/*  ──→ develop ──→ main
+```
+
+This is enforced by:
+- `enforce-branch-policy.yml` — CI job that fails PRs to `main` from non-`develop` branches
+- `Source branch check` — required status check on `main` branch protection
+
 ## Branch protection
 
 `main` branch requires the following status checks to pass:
@@ -31,6 +44,7 @@ While the crate is pre-1.0, `release-please-config.json` is configured with:
 - Clippy (all-features)
 - Rustfmt
 - Publish dry-run
+- Source branch check
 
 Configured via GitHub API. Admin enforcement is enabled.
 
