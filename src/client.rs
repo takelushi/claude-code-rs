@@ -362,6 +362,7 @@ fn parse_version(version: &str) -> Option<(u64, u64, u64)> {
 /// The library does not judge any status as an error — callers decide how to
 /// handle each case (e.g. log a warning, reject, or ignore).
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum CliVersionStatus {
     /// Installed version exactly matches `TESTED_CLI_VERSION`.
     Exact(String),
