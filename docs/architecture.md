@@ -5,7 +5,7 @@
 ```plain
 src/
   lib.rs           # pub API re-export
-  client.rs        # ClaudeClient (core CLI execution: ask, ask_structured, ask_stream), check_cli
+  client.rs        # ClaudeClient (core CLI execution: ask, ask_structured, ask_stream), check_cli, check_cli_version
   config.rs        # ClaudeConfig (--model, --system-prompt, and other options)
   conversation.rs  # Conversation (automatic session_id management for multi-turn)
   types.rs         # ClaudeResponse (including parse_result), Usage, and other core types
