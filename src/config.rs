@@ -1666,12 +1666,61 @@ mod tests {
         assert!(!args.contains(&"--print".to_string()));
     }
 
+    #[cfg(feature = "tracing")]
+    #[tracing_test::traced_test]
     #[test]
-    fn warn_if_no_print_does_not_panic() {
-        // Verify warn_if_no_print doesn't panic or cause issues
-        // when --print is absent (Bare preset)
+    fn warn_if_no_print_fires_for_bare_preset() {
         let config = ClaudeConfig::builder().preset(Preset::Bare).build();
         let _args = config.to_args("test");
-        let _stream_args = config.to_stream_args("test");
+        assert!(logs_contain("args do not contain --print"));
+    }
+
+    #[cfg(feature = "tracing")]
+    #[tracing_test::traced_test]
+    #[test]
+    fn warn_if_no_print_fires_for_bare_preset_stream() {
+        let config = ClaudeConfig::builder().preset(Preset::Bare).build();
+        let _args = config.to_stream_args("test");
+        assert!(logs_contain("args do not contain --print"));
+    }
+
+    #[cfg(feature = "tracing")]
+    #[tracing_test::traced_test]
+    #[test]
+    fn warn_if_no_print_fires_for_custom_preset_without_print() {
+        let config = ClaudeConfig::builder()
+            .preset(Preset::Custom(vec!["--no-session-persistence".into()]))
+            .build();
+        let _args = config.to_args("test");
+        assert!(logs_contain("args do not contain --print"));
+    }
+
+    #[cfg(feature = "tracing")]
+    #[tracing_test::traced_test]
+    #[test]
+    fn warn_if_no_print_does_not_fire_for_normal_preset() {
+        let config = ClaudeConfig::builder().preset(Preset::Normal).build();
+        let _args = config.to_args("test");
+        assert!(!logs_contain("args do not contain --print"));
+    }
+
+    #[cfg(feature = "tracing")]
+    #[tracing_test::traced_test]
+    #[test]
+    fn warn_if_no_print_does_not_fire_for_minimal_preset() {
+        let config = ClaudeConfig::builder().preset(Preset::Minimal).build();
+        let _args = config.to_args("test");
+        assert!(!logs_contain("args do not contain --print"));
+    }
+
+    #[cfg(feature = "tracing")]
+    #[tracing_test::traced_test]
+    #[test]
+    fn warn_if_no_print_does_not_fire_for_custom_preset_with_print() {
+        let config = ClaudeConfig::builder()
+            .preset(Preset::Custom(vec!["--print".into()]))
+            .build();
+        let _args = config.to_args("test");
+        assert!(!logs_contain("args do not contain --print"));
     }
 }
