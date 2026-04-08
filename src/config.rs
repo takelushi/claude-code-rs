@@ -1,12 +1,63 @@
 use std::time::Duration;
 
+/// Conditional tracing macro for warnings.
+macro_rules! trace_warn {
+    ($($arg:tt)*) => {
+        #[cfg(feature = "tracing")]
+        tracing::warn!($($arg)*);
+    };
+}
+
 /// Default CLI command name.
 const DEFAULT_CLI_PATH: &str = "claude";
+
+/// Preset defines the base set of CLI flags injected before
+/// builder attributes and `extra_args`.
+///
+/// # Examples
+///
+/// ```
+/// use claude_code::Preset;
+///
+/// // Reusable custom preset
+/// let my_preset = Preset::Custom(vec![
+///     "--print".into(),
+///     "--no-session-persistence".into(),
+/// ]);
+/// ```
+#[derive(Debug, Clone, Default, PartialEq)]
+#[non_exhaustive]
+pub enum Preset {
+    /// All context-minimization defaults (current behavior).
+    ///
+    /// Injects: `--print`, `--no-session-persistence`, `--strict-mcp-config`,
+    /// `--disable-slash-commands`, `--setting-sources ""`, `--mcp-config '{}'`,
+    /// `--tools ""`, `--system-prompt ""`.
+    #[default]
+    Normal,
+
+    /// Only flags required for the library's parsing to work.
+    ///
+    /// Injects: `--print`. Format flags (`--output-format`, `--verbose`)
+    /// are added by `to_args()` / `to_stream_args()` regardless of preset.
+    Minimal,
+
+    /// No auto-injected flags. User has full control via builder attributes
+    /// and `extra_args`.
+    Bare,
+
+    /// User-defined base args. These are injected before builder attributes
+    /// and `extra_args`.
+    Custom(Vec<String>),
+}
 
 /// Configuration options for Claude CLI execution.
 #[derive(Debug, Clone, Default)]
 #[non_exhaustive]
 pub struct ClaudeConfig {
+    /// Preset that determines the base set of auto-injected CLI flags.
+    /// Defaults to [`Preset::Normal`].
+    pub preset: Preset,
     /// Path to the `claude` CLI binary. Defaults to `"claude"` (resolved via `PATH`).
     ///
     /// Use this to specify an absolute path when the binary is not on `PATH`,
@@ -99,6 +150,7 @@ impl ClaudeConfig {
     #[must_use]
     pub fn to_builder(&self) -> ClaudeConfigBuilder {
         ClaudeConfigBuilder {
+            preset: self.preset.clone(),
             cli_path: self.cli_path.clone(),
             model: self.model.clone(),
             system_prompt: self.system_prompt.clone(),
@@ -133,10 +185,32 @@ impl ClaudeConfig {
     }
 
     /// Builds common CLI arguments shared by JSON and stream-json modes.
+    ///
+    /// Argument generation priority:
+    /// 1. Preset base args
+    /// 2. Builder attributes
+    /// 3. `--output-format` / `--verbose` (added by `to_args()` / `to_stream_args()`)
+    /// 4. `extra_args`
+    /// 5. prompt (added by `to_args()` / `to_stream_args()`)
     fn base_args(&self) -> Vec<String> {
-        let mut args = vec!["--print".into()];
+        let mut args = self.preset_args();
+        self.push_builder_attrs(&mut args);
+        args
+    }
 
-        // --- Context minimization defaults (overridable) ---
+    /// Returns the base flags determined by the preset.
+    fn preset_args(&self) -> Vec<String> {
+        match &self.preset {
+            Preset::Normal => self.normal_preset_args(),
+            Preset::Minimal => self.minimal_preset_args(),
+            Preset::Bare => Vec::new(),
+            Preset::Custom(custom_args) => self.filtered_custom_args(custom_args),
+        }
+    }
+
+    /// Normal preset: all context-minimization defaults.
+    fn normal_preset_args(&self) -> Vec<String> {
+        let mut args = vec!["--print".into()];
 
         // no_session_persistence: None → enabled, Some(false) → disabled
         if self.no_session_persistence != Some(false) {
@@ -172,10 +246,80 @@ impl ClaudeConfig {
             args.push("--disable-slash-commands".into());
         }
 
-        // --- Standard options ---
+        args
+    }
 
-        args.push("--system-prompt".into());
-        args.push(self.system_prompt.clone().unwrap_or_default());
+    /// Minimal preset: only `--print`.
+    fn minimal_preset_args(&self) -> Vec<String> {
+        vec!["--print".into()]
+    }
+
+    /// Filters a custom preset's args by removing flags that builder attributes
+    /// explicitly disabled (e.g., `no_session_persistence == Some(false)`).
+    fn filtered_custom_args(&self, custom_args: &[String]) -> Vec<String> {
+        custom_args
+            .iter()
+            .filter(|arg| {
+                let s = arg.as_str();
+                !((self.no_session_persistence == Some(false) && s == "--no-session-persistence")
+                    || (self.strict_mcp_config == Some(false) && s == "--strict-mcp-config")
+                    || (self.disable_slash_commands == Some(false)
+                        && s == "--disable-slash-commands"))
+            })
+            .cloned()
+            .collect()
+    }
+
+    /// Appends builder-attribute flags to the args vector.
+    ///
+    /// For Normal preset, context-minimization flags are already in the preset
+    /// args with their defaults. For other presets, these flags are only added
+    /// when explicitly set by the user.
+    fn push_builder_attrs(&self, args: &mut Vec<String>) {
+        let is_normal = matches!(self.preset, Preset::Normal);
+
+        // --- Context-minimization flags (preset-aware) ---
+        // For Normal: handled in normal_preset_args() with defaults.
+        // For others: only when explicitly set.
+        if !is_normal {
+            if self.no_session_persistence == Some(true) {
+                args.push("--no-session-persistence".into());
+            }
+
+            if let Some(ref val) = self.setting_sources {
+                args.push("--setting-sources".into());
+                args.push(val.clone());
+            }
+
+            if self.strict_mcp_config == Some(true) {
+                args.push("--strict-mcp-config".into());
+            }
+
+            if !self.mcp_config.is_empty() {
+                for cfg in &self.mcp_config {
+                    args.push("--mcp-config".into());
+                    args.push(cfg.clone());
+                }
+            }
+
+            if let Some(ref val) = self.tools {
+                args.push("--tools".into());
+                args.push(val.clone());
+            }
+
+            if self.disable_slash_commands == Some(true) {
+                args.push("--disable-slash-commands".into());
+            }
+        }
+
+        // system_prompt: Normal defaults to "" (empty); other presets only when set
+        if is_normal {
+            args.push("--system-prompt".into());
+            args.push(self.system_prompt.clone().unwrap_or_default());
+        } else if let Some(ref val) = self.system_prompt {
+            args.push("--system-prompt".into());
+            args.push(val.clone());
+        }
 
         if let Some(ref val) = self.append_system_prompt {
             args.push("--append-system-prompt".into());
@@ -263,11 +407,6 @@ impl ClaudeConfig {
         if self.bare == Some(true) {
             args.push("--bare".into());
         }
-
-        // extra_args: appended before prompt
-        args.extend(self.extra_args.iter().cloned());
-
-        args
     }
 
     /// Builds command-line arguments for JSON output mode.
@@ -278,6 +417,8 @@ impl ClaudeConfig {
         let mut args = self.base_args();
         args.push("--output-format".into());
         args.push("json".into());
+        args.extend(self.extra_args.iter().cloned());
+        self.warn_if_no_print(&args);
         args.push(prompt.into());
         args
     }
@@ -292,19 +433,29 @@ impl ClaudeConfig {
         args.push("--output-format".into());
         args.push("stream-json".into());
         args.push("--verbose".into());
-
         if self.include_partial_messages == Some(true) {
             args.push("--include-partial-messages".into());
         }
-
+        args.extend(self.extra_args.iter().cloned());
+        self.warn_if_no_print(&args);
         args.push(prompt.into());
         args
+    }
+
+    /// Emits a tracing warning if `--print` / `-p` is not in the final args.
+    fn warn_if_no_print(&self, args: &[String]) {
+        if !args.iter().any(|a| a == "--print" || a == "-p") {
+            trace_warn!(
+                "args do not contain --print; the CLI may start in interactive mode and hang"
+            );
+        }
     }
 }
 
 /// Builder for [`ClaudeConfig`].
 #[derive(Debug, Clone, Default)]
 pub struct ClaudeConfigBuilder {
+    preset: Preset,
     cli_path: Option<String>,
     model: Option<String>,
     system_prompt: Option<String>,
@@ -338,6 +489,15 @@ pub struct ClaudeConfigBuilder {
 }
 
 impl ClaudeConfigBuilder {
+    /// Sets the preset that determines which CLI flags are auto-injected.
+    ///
+    /// Defaults to [`Preset::Normal`].
+    #[must_use]
+    pub fn preset(mut self, preset: Preset) -> Self {
+        self.preset = preset;
+        self
+    }
+
     /// Sets the path to the `claude` CLI binary.
     ///
     /// When not set, `"claude"` is resolved via `PATH`.
@@ -605,6 +765,7 @@ impl ClaudeConfigBuilder {
     #[must_use]
     pub fn build(self) -> ClaudeConfig {
         ClaudeConfig {
+            preset: self.preset,
             cli_path: self.cli_path,
             model: self.model,
             system_prompt: self.system_prompt,
@@ -1100,5 +1261,417 @@ mod tests {
 
         let rebuilt = config.to_builder().build();
         assert_eq!(config.to_args("hi"), rebuilt.to_args("hi"));
+    }
+
+    // --- Preset tests ---
+
+    #[test]
+    fn default_preset_is_normal() {
+        let config = ClaudeConfig::default();
+        assert_eq!(config.preset, Preset::Normal);
+    }
+
+    #[test]
+    fn builder_default_preset_is_normal() {
+        let config = ClaudeConfig::builder().build();
+        assert_eq!(config.preset, Preset::Normal);
+    }
+
+    #[test]
+    fn explicit_normal_preset_matches_default_to_args() {
+        let default_config = ClaudeConfig::default();
+        let explicit_config = ClaudeConfig::builder().preset(Preset::Normal).build();
+        assert_eq!(
+            default_config.to_args("test"),
+            explicit_config.to_args("test")
+        );
+    }
+
+    #[test]
+    fn explicit_normal_preset_matches_default_to_stream_args() {
+        let default_config = ClaudeConfig::default();
+        let explicit_config = ClaudeConfig::builder().preset(Preset::Normal).build();
+        assert_eq!(
+            default_config.to_stream_args("test"),
+            explicit_config.to_stream_args("test")
+        );
+    }
+
+    #[test]
+    fn to_builder_preserves_preset() {
+        let config = ClaudeConfig::builder()
+            .preset(Preset::Minimal)
+            .model("haiku")
+            .build();
+        let rebuilt = config.to_builder().build();
+        assert_eq!(rebuilt.preset, Preset::Minimal);
+    }
+
+    #[test]
+    fn minimal_preset_to_args() {
+        let config = ClaudeConfig::builder().preset(Preset::Minimal).build();
+        let args = config.to_args("test");
+
+        assert!(args.contains(&"--print".to_string()));
+        assert!(args.contains(&"--output-format".to_string()));
+        assert!(args.contains(&"json".to_string()));
+        assert_eq!(args.last().unwrap(), "test");
+
+        // Context-minimization flags must NOT be present
+        assert!(!args.contains(&"--no-session-persistence".to_string()));
+        assert!(!args.contains(&"--strict-mcp-config".to_string()));
+        assert!(!args.contains(&"--disable-slash-commands".to_string()));
+        assert!(!args.contains(&"--setting-sources".to_string()));
+        assert!(!args.contains(&"--mcp-config".to_string()));
+        assert!(!args.contains(&"--tools".to_string()));
+        assert!(!args.contains(&"--system-prompt".to_string()));
+    }
+
+    #[test]
+    fn minimal_preset_to_stream_args() {
+        let config = ClaudeConfig::builder().preset(Preset::Minimal).build();
+        let args = config.to_stream_args("test");
+
+        assert!(args.contains(&"--print".to_string()));
+        assert!(args.contains(&"--output-format".to_string()));
+        assert!(args.contains(&"stream-json".to_string()));
+        assert!(args.contains(&"--verbose".to_string()));
+        assert_eq!(args.last().unwrap(), "test");
+
+        assert!(!args.contains(&"--no-session-persistence".to_string()));
+        assert!(!args.contains(&"--system-prompt".to_string()));
+    }
+
+    #[test]
+    fn minimal_preset_with_builder_add() {
+        let config = ClaudeConfig::builder()
+            .preset(Preset::Minimal)
+            .no_session_persistence(true)
+            .model("haiku")
+            .build();
+        let args = config.to_args("test");
+
+        assert!(args.contains(&"--print".to_string()));
+        assert!(args.contains(&"--no-session-persistence".to_string()));
+        assert!(args.contains(&"--model".to_string()));
+    }
+
+    #[test]
+    fn minimal_preset_with_system_prompt() {
+        let config = ClaudeConfig::builder()
+            .preset(Preset::Minimal)
+            .system_prompt("Be helpful")
+            .build();
+        let args = config.to_args("test");
+
+        let idx = args.iter().position(|a| a == "--system-prompt").unwrap();
+        assert_eq!(args[idx + 1], "Be helpful");
+    }
+
+    #[test]
+    fn bare_preset_to_args() {
+        let config = ClaudeConfig::builder().preset(Preset::Bare).build();
+        let args = config.to_args("test");
+
+        // Only --output-format json and prompt
+        assert!(args.contains(&"--output-format".to_string()));
+        assert!(args.contains(&"json".to_string()));
+        assert_eq!(args.last().unwrap(), "test");
+
+        // No preset flags at all
+        assert!(!args.contains(&"--print".to_string()));
+        assert!(!args.contains(&"--no-session-persistence".to_string()));
+        assert!(!args.contains(&"--strict-mcp-config".to_string()));
+        assert!(!args.contains(&"--disable-slash-commands".to_string()));
+        assert!(!args.contains(&"--setting-sources".to_string()));
+        assert!(!args.contains(&"--mcp-config".to_string()));
+        assert!(!args.contains(&"--tools".to_string()));
+        assert!(!args.contains(&"--system-prompt".to_string()));
+    }
+
+    #[test]
+    fn bare_preset_to_stream_args() {
+        let config = ClaudeConfig::builder().preset(Preset::Bare).build();
+        let args = config.to_stream_args("test");
+
+        assert!(args.contains(&"--output-format".to_string()));
+        assert!(args.contains(&"stream-json".to_string()));
+        assert!(args.contains(&"--verbose".to_string()));
+        assert_eq!(args.last().unwrap(), "test");
+
+        assert!(!args.contains(&"--print".to_string()));
+    }
+
+    #[test]
+    fn bare_preset_with_extra_args() {
+        let config = ClaudeConfig::builder()
+            .preset(Preset::Bare)
+            .extra_args(["--print", "--cli-mode"])
+            .build();
+        let args = config.to_args("test");
+
+        assert!(args.contains(&"--print".to_string()));
+        assert!(args.contains(&"--cli-mode".to_string()));
+    }
+
+    #[test]
+    fn extra_args_after_format() {
+        let config = ClaudeConfig::builder()
+            .preset(Preset::Bare)
+            .extra_args(["--new-flag"])
+            .build();
+        let args = config.to_args("test");
+
+        // extra_args should appear after --output-format (for last-wins override)
+        let format_idx = args.iter().position(|a| a == "--output-format").unwrap();
+        let flag_idx = args.iter().position(|a| a == "--new-flag").unwrap();
+        assert!(flag_idx > format_idx);
+    }
+
+    // --- Custom preset tests ---
+
+    #[test]
+    fn custom_preset_to_args() {
+        let config = ClaudeConfig::builder()
+            .preset(Preset::Custom(vec![
+                "--print".into(),
+                "--no-session-persistence".into(),
+            ]))
+            .build();
+        let args = config.to_args("test");
+
+        assert!(args.contains(&"--print".to_string()));
+        assert!(args.contains(&"--no-session-persistence".to_string()));
+        assert!(args.contains(&"--output-format".to_string()));
+        assert_eq!(args.last().unwrap(), "test");
+
+        // Flags NOT in the custom preset should be absent
+        assert!(!args.contains(&"--strict-mcp-config".to_string()));
+        assert!(!args.contains(&"--disable-slash-commands".to_string()));
+    }
+
+    #[test]
+    fn custom_preset_is_reusable() {
+        let preset = Preset::Custom(vec!["--print".into(), "--no-session-persistence".into()]);
+
+        let config1 = ClaudeConfig::builder()
+            .preset(preset.clone())
+            .model("haiku")
+            .build();
+        let config2 = ClaudeConfig::builder()
+            .preset(preset)
+            .model("sonnet")
+            .build();
+
+        let args1 = config1.to_args("test");
+        let args2 = config2.to_args("test");
+
+        // Both should have the preset flags
+        assert!(args1.contains(&"--print".to_string()));
+        assert!(args2.contains(&"--print".to_string()));
+        assert!(args1.contains(&"--no-session-persistence".to_string()));
+        assert!(args2.contains(&"--no-session-persistence".to_string()));
+    }
+
+    #[test]
+    fn custom_preset_builder_override_remove() {
+        let config = ClaudeConfig::builder()
+            .preset(Preset::Custom(vec![
+                "--print".into(),
+                "--no-session-persistence".into(),
+            ]))
+            .no_session_persistence(false) // remove from custom preset
+            .build();
+        let args = config.to_args("test");
+
+        assert!(args.contains(&"--print".to_string()));
+        assert!(!args.contains(&"--no-session-persistence".to_string()));
+    }
+
+    #[test]
+    fn custom_preset_builder_override_remove_strict_mcp() {
+        let config = ClaudeConfig::builder()
+            .preset(Preset::Custom(vec![
+                "--print".into(),
+                "--strict-mcp-config".into(),
+            ]))
+            .strict_mcp_config(false)
+            .build();
+        let args = config.to_args("test");
+
+        assert!(!args.contains(&"--strict-mcp-config".to_string()));
+    }
+
+    #[test]
+    fn custom_preset_builder_override_remove_disable_slash_commands() {
+        let config = ClaudeConfig::builder()
+            .preset(Preset::Custom(vec![
+                "--print".into(),
+                "--disable-slash-commands".into(),
+            ]))
+            .disable_slash_commands(false)
+            .build();
+        let args = config.to_args("test");
+
+        assert!(!args.contains(&"--disable-slash-commands".to_string()));
+    }
+
+    // --- Priority override tests ---
+
+    #[test]
+    fn priority_extra_args_appended_last() {
+        let config = ClaudeConfig::builder()
+            .preset(Preset::Normal)
+            .extra_args(["--new-flag"])
+            .build();
+        let args = config.to_args("test");
+
+        let prompt_idx = args.iter().position(|a| a == "test").unwrap();
+        let flag_idx = args.iter().position(|a| a == "--new-flag").unwrap();
+        assert!(flag_idx < prompt_idx);
+        assert!(flag_idx > 0); // not the first arg
+    }
+
+    #[test]
+    fn priority_extra_args_overrides_format() {
+        let config = ClaudeConfig::builder()
+            .preset(Preset::Normal)
+            .extra_args(["--output-format", "new"])
+            .build();
+        let args = config.to_args("test");
+
+        // Both the library-injected and user-specified --output-format present
+        let format_positions: Vec<_> = args
+            .iter()
+            .enumerate()
+            .filter(|(_, a)| a.as_str() == "--output-format")
+            .map(|(i, _)| i)
+            .collect();
+        assert_eq!(format_positions.len(), 2);
+        // User-specified comes after library-injected
+        assert!(format_positions[1] > format_positions[0]);
+    }
+
+    #[test]
+    fn priority_full_stack() {
+        let config = ClaudeConfig::builder()
+            .preset(Preset::Minimal)
+            .model("haiku")
+            .extra_args(["--model", "sonnet"])
+            .build();
+        let args = config.to_args("test");
+
+        // Both --model values present
+        let model_positions: Vec<_> = args
+            .iter()
+            .enumerate()
+            .filter(|(_, a)| a.as_str() == "--model")
+            .map(|(i, _)| i)
+            .collect();
+        assert_eq!(model_positions.len(), 2);
+        // haiku (builder attr) before sonnet (extra_args)
+        assert_eq!(args[model_positions[0] + 1], "haiku");
+        assert_eq!(args[model_positions[1] + 1], "sonnet");
+    }
+
+    // --- Boolean flag override tests ---
+
+    #[test]
+    fn bool_flag_none_follows_normal_preset() {
+        // Normal includes these flags by default when None
+        let config = ClaudeConfig::builder().preset(Preset::Normal).build();
+        let args = config.to_args("test");
+        assert!(args.contains(&"--no-session-persistence".to_string()));
+        assert!(args.contains(&"--strict-mcp-config".to_string()));
+        assert!(args.contains(&"--disable-slash-commands".to_string()));
+    }
+
+    #[test]
+    fn bool_flag_none_follows_minimal_preset() {
+        // Minimal does NOT include these flags when None
+        let config = ClaudeConfig::builder().preset(Preset::Minimal).build();
+        let args = config.to_args("test");
+        assert!(!args.contains(&"--no-session-persistence".to_string()));
+        assert!(!args.contains(&"--strict-mcp-config".to_string()));
+        assert!(!args.contains(&"--disable-slash-commands".to_string()));
+    }
+
+    #[test]
+    fn bool_flag_true_adds_to_minimal() {
+        let config = ClaudeConfig::builder()
+            .preset(Preset::Minimal)
+            .no_session_persistence(true)
+            .strict_mcp_config(true)
+            .disable_slash_commands(true)
+            .build();
+        let args = config.to_args("test");
+        assert!(args.contains(&"--no-session-persistence".to_string()));
+        assert!(args.contains(&"--strict-mcp-config".to_string()));
+        assert!(args.contains(&"--disable-slash-commands".to_string()));
+    }
+
+    #[test]
+    fn bool_flag_false_removes_from_normal() {
+        let config = ClaudeConfig::builder()
+            .preset(Preset::Normal)
+            .no_session_persistence(false)
+            .strict_mcp_config(false)
+            .disable_slash_commands(false)
+            .build();
+        let args = config.to_args("test");
+        assert!(!args.contains(&"--no-session-persistence".to_string()));
+        assert!(!args.contains(&"--strict-mcp-config".to_string()));
+        assert!(!args.contains(&"--disable-slash-commands".to_string()));
+    }
+
+    // --- Hang protection: --print presence tests ---
+
+    #[test]
+    fn normal_preset_contains_print() {
+        let config = ClaudeConfig::builder().preset(Preset::Normal).build();
+        let args = config.to_args("test");
+        assert!(args.contains(&"--print".to_string()));
+    }
+
+    #[test]
+    fn minimal_preset_contains_print() {
+        let config = ClaudeConfig::builder().preset(Preset::Minimal).build();
+        let args = config.to_args("test");
+        assert!(args.contains(&"--print".to_string()));
+    }
+
+    #[test]
+    fn bare_preset_no_print() {
+        let config = ClaudeConfig::builder().preset(Preset::Bare).build();
+        let args = config.to_args("test");
+        assert!(!args.contains(&"--print".to_string()));
+    }
+
+    #[test]
+    fn bare_preset_with_print_in_extra_args() {
+        let config = ClaudeConfig::builder()
+            .preset(Preset::Bare)
+            .extra_args(["-p"])
+            .build();
+        let args = config.to_args("test");
+        assert!(args.contains(&"-p".to_string()));
+    }
+
+    #[test]
+    fn custom_preset_without_print() {
+        let config = ClaudeConfig::builder()
+            .preset(Preset::Custom(vec!["--no-session-persistence".into()]))
+            .build();
+        let args = config.to_args("test");
+        assert!(!args.contains(&"--print".to_string()));
+    }
+
+    #[test]
+    fn warn_if_no_print_does_not_panic() {
+        // Verify warn_if_no_print doesn't panic or cause issues
+        // when --print is absent (Bare preset)
+        let config = ClaudeConfig::builder().preset(Preset::Bare).build();
+        let _args = config.to_args("test");
+        let _stream_args = config.to_stream_args("test");
     }
 }

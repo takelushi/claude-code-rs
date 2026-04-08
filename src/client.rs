@@ -138,6 +138,7 @@ impl ClaudeClient {
 
         let mut child = TokioCommand::new(self.config.cli_path_or_default())
             .args(&args)
+            .stdin(std::process::Stdio::null())
             .stdout(std::process::Stdio::piped())
             .stderr(std::process::Stdio::piped())
             .spawn()
@@ -340,6 +341,75 @@ pub async fn check_cli_with_path(cli_path: &str) -> Result<String, ClaudeError> 
 
     let version = String::from_utf8_lossy(&output.stdout).trim().to_string();
     Ok(version)
+}
+
+/// Parses a version string like `"2.1.92"` or `"claude-code 2.1.92"` into `(major, minor, patch)`.
+///
+/// Returns `None` if no valid semver triple is found.
+fn parse_version(version: &str) -> Option<(u64, u64, u64)> {
+    // Take the last whitespace-delimited token to handle prefixes like "claude-code 2.1.92"
+    let ver = version.split_whitespace().next_back()?;
+    let mut parts = ver.splitn(3, '.');
+    let major = parts.next()?.parse().ok()?;
+    let minor = parts.next()?.parse().ok()?;
+    let patch = parts.next()?.parse().ok()?;
+    Some((major, minor, patch))
+}
+
+/// Result of comparing the installed CLI version against [`TESTED_CLI_VERSION`](crate::TESTED_CLI_VERSION).
+///
+/// Each variant carries the raw version string returned by `claude --version`.
+/// The library does not judge any status as an error — callers decide how to
+/// handle each case (e.g. log a warning, reject, or ignore).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum CliVersionStatus {
+    /// Installed version exactly matches `TESTED_CLI_VERSION`.
+    Exact(String),
+    /// Installed version is newer than `TESTED_CLI_VERSION`.
+    Newer(String),
+    /// Installed version is older than `TESTED_CLI_VERSION`.
+    Older(String),
+    /// Installed version string could not be parsed.
+    Unknown(String),
+}
+
+/// Compares an `installed` version string against a `tested` version string.
+fn compare_version(installed: &str, tested: &str) -> CliVersionStatus {
+    let tested_tuple = parse_version(tested).unwrap_or((0, 0, 0));
+    match parse_version(installed) {
+        None => CliVersionStatus::Unknown(installed.to_string()),
+        Some(v) if v == tested_tuple => CliVersionStatus::Exact(installed.to_string()),
+        Some(v) if v > tested_tuple => CliVersionStatus::Newer(installed.to_string()),
+        Some(_) => CliVersionStatus::Older(installed.to_string()),
+    }
+}
+
+/// Checks the installed `claude` CLI version against [`TESTED_CLI_VERSION`](crate::TESTED_CLI_VERSION).
+///
+/// Runs `claude --version` and returns a [`CliVersionStatus`] indicating
+/// whether the installed version is exact, newer, older, or unparseable.
+///
+/// # Errors
+///
+/// - [`ClaudeError::CliNotFound`] if `claude` is not in PATH.
+/// - [`ClaudeError::NonZeroExit`] if the command fails.
+/// - [`ClaudeError::Io`] for other I/O errors.
+pub async fn check_cli_version() -> Result<CliVersionStatus, ClaudeError> {
+    check_cli_version_with_path("claude").await
+}
+
+/// Checks the CLI at the given path against [`TESTED_CLI_VERSION`](crate::TESTED_CLI_VERSION).
+///
+/// Returns a [`CliVersionStatus`] indicating the comparison result.
+///
+/// # Errors
+///
+/// - [`ClaudeError::CliNotFound`] if the binary is not found.
+/// - [`ClaudeError::NonZeroExit`] if the command fails.
+/// - [`ClaudeError::Io`] for other I/O errors.
+pub async fn check_cli_version_with_path(cli_path: &str) -> Result<CliVersionStatus, ClaudeError> {
+    let version = check_cli_with_path(cli_path).await?;
+    Ok(compare_version(&version, crate::TESTED_CLI_VERSION))
 }
 
 #[cfg(test)]
@@ -558,5 +628,87 @@ mod tests {
         let malicious = "$(echo claude)";
         let err = check_cli_with_path(malicious).await.unwrap_err();
         assert!(matches!(err, ClaudeError::CliNotFound));
+    }
+
+    #[test]
+    fn parse_version_semver() {
+        assert_eq!(parse_version("2.1.92"), Some((2, 1, 92)));
+    }
+
+    #[test]
+    fn parse_version_with_prefix() {
+        assert_eq!(parse_version("claude-code 2.1.92"), Some((2, 1, 92)));
+    }
+
+    #[test]
+    fn parse_version_invalid() {
+        assert_eq!(parse_version("not-a-version"), None);
+    }
+
+    #[test]
+    fn parse_version_empty() {
+        assert_eq!(parse_version(""), None);
+    }
+
+    #[test]
+    fn parse_version_two_components() {
+        assert_eq!(parse_version("2.1"), None);
+    }
+
+    #[test]
+    fn parse_version_four_components() {
+        // splitn(3, '.') yields ["2", "1", "92.1"] — "92.1" fails u64 parse
+        assert_eq!(parse_version("2.1.92.1"), None);
+    }
+
+    #[test]
+    fn compare_version_exact() {
+        let status = compare_version("2.1.92", "2.1.92");
+        assert!(matches!(status, CliVersionStatus::Exact(_)));
+    }
+
+    #[test]
+    fn compare_version_newer() {
+        let status = compare_version("2.2.0", "2.1.92");
+        assert!(matches!(status, CliVersionStatus::Newer(_)));
+    }
+
+    #[test]
+    fn compare_version_older() {
+        let status = compare_version("2.0.0", "2.1.92");
+        assert!(matches!(status, CliVersionStatus::Older(_)));
+    }
+
+    #[test]
+    fn compare_version_major_newer() {
+        let status = compare_version("3.0.0", "2.1.92");
+        assert!(matches!(status, CliVersionStatus::Newer(_)));
+    }
+
+    #[test]
+    fn compare_version_major_older() {
+        let status = compare_version("1.9.99", "2.1.92");
+        assert!(matches!(status, CliVersionStatus::Older(_)));
+    }
+
+    #[test]
+    fn compare_version_unparseable() {
+        let status = compare_version("garbage", "2.1.92");
+        assert!(matches!(status, CliVersionStatus::Unknown(_)));
+    }
+
+    #[test]
+    fn compare_version_with_prefix() {
+        let status = compare_version("claude-code 2.1.92", "2.1.92");
+        assert!(matches!(status, CliVersionStatus::Exact(_)));
+    }
+
+    #[test]
+    fn cli_version_status_preserves_version_string() {
+        let status = compare_version("2.2.0", "2.1.92");
+        match status {
+            CliVersionStatus::Newer(v) => assert_eq!(v, "2.2.0"),
+            other => panic!("expected Newer, got {other:?}"),
+        }
     }
 }
