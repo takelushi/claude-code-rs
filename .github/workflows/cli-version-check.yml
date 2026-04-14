@@ -2,7 +2,7 @@ name: CLI Version Check
 
 on:
   schedule:
-    - cron: '0 0 * * 1' # Monday 00:00 UTC
+    - cron: '0 0 * * *' # Daily 00:00 UTC
   workflow_dispatch:
 
 concurrency:
@@ -130,7 +130,13 @@ jobs:
             1. Read docs/claude-cli.md for the "Updating for New CLI Versions" checklist
             2. Analyze the test failures and fix the code
             3. Run `cargo test` and `cargo clippy -- -D warnings` to verify fixes
-            4. Create a PR targeting `develop` from branch `cli-upgrade/${{ needs.detect-version.outputs.new_version }}/test-fix`
+            4. Commit the fix with message "fix: resolve test failures for CLI v${{ needs.detect-version.outputs.new_version }}"
+            5. Force-push to the persistent branch `cli-upgrade/test-fix`:
+               `git push --force origin HEAD:cli-upgrade/test-fix`
+            6. Check for an existing open PR on that branch and update-or-create:
+               - `PR=$(gh pr list --head cli-upgrade/test-fix --state open --json number --jq '.[0].number // empty')`
+               - If `$PR` is non-empty: `gh pr edit "$PR" --title "<title>" --body "<body>"`
+               - Else: `gh pr create --base develop --head cli-upgrade/test-fix --title "<title>" --body "<body>"`
 
             PR title: "fix: resolve test failures for CLI v${{ needs.detect-version.outputs.new_version }}"
             Reference issue #7 in the PR body.
@@ -172,7 +178,7 @@ jobs:
           } >> "$GITHUB_OUTPUT"
 
   update-options:
-    name: Create option update PR(s)
+    name: Create option update PR
     needs: [detect-version, check-options]
     if: needs.check-options.outputs.options_changed == 'true'
     runs-on: ubuntu-latest
@@ -197,19 +203,20 @@ jobs:
             Your task:
             1. Read docs/claude-cli.md — especially the "CLI Option Support Status" tables
                (Supported / Known Unsupported / Interactive-Only / Managed Internally)
-            2. Analyze the diff and determine whether changes affect existing options or add new ones
-            3. For EXISTING option changes (renamed, removed, behavior changed):
-               - Update relevant code in src/ and docs/claude-cli.md
-               - Create a PR targeting `develop` from branch `cli-upgrade/${{ needs.detect-version.outputs.new_version }}/option-changes`
-               - PR title: "fix: update for CLI v${{ needs.detect-version.outputs.new_version }} option changes"
-            4. For NEW options only (additions that don't affect existing functionality):
-               - Classify them into the appropriate table in docs/claude-cli.md
-               - Create a PR targeting `develop` from branch `cli-upgrade/${{ needs.detect-version.outputs.new_version }}/new-options`
-               - PR title: "docs: add new CLI v${{ needs.detect-version.outputs.new_version }} options"
-            5. If both types exist, create two separate PRs
-            6. Run `cargo test` and `cargo clippy -- -D warnings` to verify any code changes
+            2. Analyze the diff — handle BOTH kinds of changes in a SINGLE commit/PR:
+               - EXISTING option changes (renamed/removed/behavior changed): update code in src/ and docs/claude-cli.md
+               - NEW options: classify them into the appropriate table in docs/claude-cli.md
+            3. Run `cargo test` and `cargo clippy -- -D warnings` to verify any code changes
+            4. Commit all changes in ONE commit with message "chore: update for CLI v${{ needs.detect-version.outputs.new_version }} option changes"
+            5. Force-push to the persistent branch `cli-upgrade/option-changes`:
+               `git push --force origin HEAD:cli-upgrade/option-changes`
+            6. Check for an existing open PR on that branch and update-or-create:
+               - `PR=$(gh pr list --head cli-upgrade/option-changes --state open --json number --jq '.[0].number // empty')`
+               - If `$PR` is non-empty: `gh pr edit "$PR" --title "<title>" --body "<body>"`
+               - Else: `gh pr create --base develop --head cli-upgrade/option-changes --title "<title>" --body "<body>"`
 
-            Reference issue #7 in all PR bodies.
+            PR title: "chore: update for CLI v${{ needs.detect-version.outputs.new_version }} option changes"
+            Reference issue #7 in the PR body.
           claude_args: "--allowedTools Bash,Read,Edit,Write,Glob,Grep"
 
   version-bump:
@@ -236,39 +243,40 @@ jobs:
           sed -i "s/TESTED_CLI_VERSION: &str = \".*\"/TESTED_CLI_VERSION: \&str = \"$NEW_VERSION\"/" src/lib.rs
           sed -i "s/<!-- cli-version -->.*<!-- \/cli-version -->/<!-- cli-version -->**v$NEW_VERSION**<!-- \/cli-version -->/" README.md
 
-      - name: Create PR
+      - name: Create or update PR
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          NEW_VERSION: ${{ needs.detect-version.outputs.new_version }}
         run: |
-          BRANCH="cli-upgrade/${{ needs.detect-version.outputs.new_version }}/version-bump"
-
-          # Check if branch already exists
-          if git ls-remote --exit-code origin "refs/heads/$BRANCH" > /dev/null 2>&1; then
-            echo "Branch $BRANCH already exists, skipping"
-            exit 0
-          fi
+          BRANCH="cli-upgrade/version-bump"
 
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git checkout -b "$BRANCH"
           git add .claude-cli-version .claude-cli-help-output src/lib.rs README.md
-          git commit -m "chore: bump tracked CLI version to ${{ needs.detect-version.outputs.new_version }}"
-          git push origin "$BRANCH"
+          git commit -m "chore: bump tracked CLI version to $NEW_VERSION"
 
-          gh pr create \
-            --base develop \
-            --head "$BRANCH" \
-            --title "chore: bump tracked CLI version to ${{ needs.detect-version.outputs.new_version }}" \
-            --body "$(cat <<'PRBODY'
+          # Force-push to the persistent branch (overwrites any stale commits)
+          git push --force origin "$BRANCH"
+
+          PR_TITLE="chore: bump tracked CLI version to $NEW_VERSION"
+          PR_BODY=$(cat <<PRBODY
           ## Summary
 
-          - Update `.claude-cli-version` to ${{ needs.detect-version.outputs.new_version }}
-          - Update `.claude-cli-help-output` with new `--help` output
-          - Update `TESTED_CLI_VERSION` in `src/lib.rs`
-          - Update version in `README.md`
+          - Update \`.claude-cli-version\` to $NEW_VERSION
+          - Update \`.claude-cli-help-output\` with new \`--help\` output
+          - Update \`TESTED_CLI_VERSION\` in \`src/lib.rs\`
+          - Update version in \`README.md\`
 
-          > **Note:** If `test-fix` or `option-changes` PRs exist for this version, merge them before this PR.
+          > **Note:** If \`test-fix\` or \`option-changes\` PRs exist for this version, merge them before this PR.
 
           Ref #7
           PRBODY
-          )"
+          )
+
+          PR_NUMBER=$(gh pr list --head "$BRANCH" --state open --json number --jq '.[0].number // empty')
+          if [ -n "$PR_NUMBER" ]; then
+            gh pr edit "$PR_NUMBER" --title "$PR_TITLE" --body "$PR_BODY"
+          else
+            gh pr create --base develop --head "$BRANCH" --title "$PR_TITLE" --body "$PR_BODY"
+          fi

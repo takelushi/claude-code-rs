@@ -203,13 +203,15 @@ The following options are injected automatically by the library. Do not pass the
 
 ### Automated workflow
 
-The `cli-version-check.yml` workflow runs weekly (Monday 00:00 UTC) and detects new Claude CLI releases via the npm registry. When a new version is found it:
+The `cli-version-check.yml` workflow runs daily (00:00 UTC) and detects new Claude CLI releases via the npm registry. When a new version is found it:
 
-1. Runs `cargo test` and `cargo clippy` — on failure, `claude-code-action` creates a fix PR
-2. Diffs `claude --help` output against `.claude-cli-help-output` — on changes, `claude-code-action` creates PRs for option changes and/or documentation updates
-3. Creates a version bump PR updating `.claude-cli-version`, `.claude-cli-help-output`, `TESTED_CLI_VERSION` in `src/lib.rs`, and `README.md`
+1. Runs `cargo test` and `cargo clippy` — on failure, `claude-code-action` creates or updates a fix PR
+2. Diffs `claude --help` output against `.claude-cli-help-output` — on changes, `claude-code-action` creates or updates a single option-changes PR (covering both modified options and new options)
+3. Creates or updates a version bump PR updating `.claude-cli-version`, `.claude-cli-help-output`, `TESTED_CLI_VERSION` in `src/lib.rs`, and `README.md`
 
 All PRs target `develop`. The workflow uses Max plan authentication (`CLAUDE_CODE_OAUTH_TOKEN`).
+
+To prevent PR/branch proliferation under daily runs, each job uses a persistent branch (`cli-upgrade/version-bump`, `cli-upgrade/test-fix`, `cli-upgrade/option-changes`) and force-pushes on every run. If an open PR already exists for the branch, its title/body is updated with the latest version info; otherwise a new PR is created.
 
 Tracked files in the repository root:
 
