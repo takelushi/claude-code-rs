@@ -52,7 +52,7 @@ Configured via GitHub API. Admin enforcement is enabled.
 | File | Purpose |
 |------|---------|
 | `.github/workflows/release-please.yml` | release-please action + publish job |
-| `.github/workflows/cli-version-check.yml` | Weekly CLI version upgrade check (see `docs/claude-cli.md`) |
+| `.github/workflows/cli-version-check.yml` | Daily CLI version upgrade check (see `docs/claude-cli.md`) |
 | `release-please-config.json` | Release-please settings (release type, pre-1.0 bump behavior) |
 | `.release-please-manifest.json` | Tracks current version (updated by release-please) |
 
