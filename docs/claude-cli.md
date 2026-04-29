@@ -130,7 +130,7 @@ The library addresses this by using a `ChildGuard` RAII wrapper in `ask_stream` 
 
 ## CLI Option Support Status
 
-Classification of all `claude` CLI options as of v2.1.92. The library operates in `--print` mode only.
+Classification of all `claude` CLI options as of v2.1.122. The library operates in `--print` mode only.
 
 ### Supported
 
@@ -165,6 +165,10 @@ These options have dedicated `ClaudeConfigBuilder` methods:
 | `--disable-slash-commands` | `disable_slash_commands()` |
 | `--strict-mcp-config` | `strict_mcp_config()` |
 
+**Notes (v2.1.122):**
+- `--effort` added `xhigh` as a valid level (between `high` and `max`); use `effort::XHIGH` constant.
+- `--allowedTools` / `--disallowedTools` tool pattern syntax: the CLI help example changed from `Bash(git:*)` to `Bash(git *)` (space instead of colon as separator inside parentheses). The library passes the value through unchanged.
+
 ### Known Unsupported
 
 Relevant to `--print` mode but not yet implemented as builder methods. All of these can be passed via `extra_args()`.
@@ -185,9 +189,11 @@ Relevant to `--print` mode but not yet implemented as builder methods. All of th
 
 ### Interactive-Only (Not Applicable)
 
-These options are for interactive CLI sessions and do not apply to `--print` mode:
+These options and subcommands are for interactive CLI sessions and do not apply to `--print` mode:
 
 `--chrome`, `--no-chrome`, `--ide`, `--tmux`, `--worktree`, `--from-pr`, `--remote-control-session-name-prefix`, `--replay-user-messages`, `--plugin-dir`
+
+Subcommands: `ultrareview` (cloud-hosted multi-agent code review; added in CLI v2.1.122)
 
 ### Managed Internally
 
