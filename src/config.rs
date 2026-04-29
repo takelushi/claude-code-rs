@@ -808,6 +808,8 @@ pub mod effort {
     pub const MEDIUM: &str = "medium";
     /// High effort.
     pub const HIGH: &str = "high";
+    /// Extra-high effort (added in CLI v2.1.122).
+    pub const XHIGH: &str = "xhigh";
     /// Maximum effort.
     pub const MAX: &str = "max";
 }
@@ -1111,11 +1113,11 @@ mod tests {
     #[test]
     fn allowed_tools_multiple() {
         let config = ClaudeConfig::builder()
-            .allowed_tools(["Bash(git:*)", "Edit", "Read"])
+            .allowed_tools(["Bash(git *)", "Edit", "Read"])
             .build();
         let args = config.to_args("test");
         let idx = args.iter().position(|a| a == "--allowedTools").unwrap();
-        assert_eq!(args[idx + 1], "Bash(git:*)");
+        assert_eq!(args[idx + 1], "Bash(git *)");
         assert_eq!(args[idx + 2], "Edit");
         assert_eq!(args[idx + 3], "Read");
     }
