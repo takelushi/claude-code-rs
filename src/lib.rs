@@ -34,7 +34,7 @@
 /// This does not guarantee compatibility with this exact version only;
 /// it indicates the version used during development and testing.
 /// Older or newer CLI versions may work but have not been verified.
-pub const TESTED_CLI_VERSION: &str = "2.1.105";
+pub const TESTED_CLI_VERSION: &str = "2.1.123";
 
 mod client;
 mod config;
