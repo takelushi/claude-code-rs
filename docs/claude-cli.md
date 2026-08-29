@@ -235,13 +235,15 @@ Compiling and running agent-authored code is the step with the widest blast radi
 
 `adapt` passes `github_token: ${{ github.token }}` to `claude-code-action`. This matters: when no token is supplied the action exchanges an OIDC token for a GitHub App token carrying `contents`, `pull_requests` and `issues` write (`src/github/token.ts:69-72`) and installs it as the git remote credential (`src/github/operations/git-config.ts:132`). A job's `permissions:` block constrains `github.token` only, so without an explicit token the job's `contents: read` would not restrict the agent. Supplying one sets `OVERRIDE_GITHUB_TOKEN`, which short-circuits the exchange (`token.ts:160-165`); it also avoids that path's workflow-validation skip, which can return success without having run Claude at all.
 
-`publish-adapt` picks the commit type from what actually changed, because release-please reads it:
+### How the commit type is chosen
 
-| Condition | Type |
-| --- | --- |
-| The agent reported a public API break | `feat!:` (minor bump pre-1.0) |
-| `src/` changed beyond the mechanical `TESTED_CLI_VERSION` line | `fix:` |
-| Documentation only | `chore:` |
+release-please reads the conventional-commit type to decide whether to cut a release, so it has to be right. The agent declares it, in `.adapt-report/type` — one bare word from `fix`, `feat`, `chore`, `docs`, `test`, `refactor` — alongside `.adapt-report/breaking` (`yes`/`no`) and a free-form `.adapt-report/summary.md`. `adapt` validates both machine fields against an allowlist and fails on anything else, including an empty or missing file; a `breaking` of `yes` appends `!` to the type.
+
+Deriving the type from the diff instead does not work in this repository. Unit tests live in `#[cfg(test)]` modules inside `src/`, and doc comments live there too, so a test-only or comment-only edit is indistinguishable by path from a behaviour change — it would ship as `fix:` and publish a release with no functional change.
+
+The diff is still used as a cross-check in the other direction: if `src/` changed beyond the mechanical `TESTED_CLI_VERSION` line but the agent declared `chore`, the job fails. That comparison excludes the constant's definition line exactly rather than by substring, because `src/client.rs` has several real lines that mention the constant.
+
+The three report files live in the workspace so that no working-directory restriction can block the agent from writing them, and are deleted before staging so they never reach the patch.
 
 ### Operational notes
 

@@ -237,6 +237,9 @@ jobs:
     permissions:
       contents: read
       pull-requests: read
+    outputs:
+      change_type: ${{ steps.export.outputs.type }}
+      breaking: ${{ steps.export.outputs.breaking }}
     steps:
       - uses: actions/checkout@v6
         with:
@@ -331,25 +334,54 @@ jobs:
                - EXISTING option changes (renamed/removed/behavior changed): update
                  code in src/ and docs/claude-cli.md
                - NEW options: classify them into the appropriate table in docs/claude-cli.md
-            3. Verify with `cargo test`, `cargo clippy -- -D warnings`, and `cargo fmt`
-            4. Write a report to `${{ runner.temp }}/adapt-summary.md` with EXACTLY
-               this shape — the publishing job parses the first line:
+            3. Verify with exactly the commands the publishing gate runs, so that
+               what passes for you also passes there:
+               `cargo fmt`, then
+               `cargo clippy --all-features -- -D warnings`,
+               `cargo clippy --no-default-features -- -D warnings`,
+               `cargo test --all-features`,
+               `cargo test --no-default-features`
+               (`structured` is a non-default feature, so plain `cargo test` does
+               not compile all of the crate). Do NOT run `cargo test -- --ignored`.
+            4. Write a report as THREE separate files in the `.adapt-report/`
+               directory at the repository root. Create the directory if needed.
+               Keep each machine-read file to a single bare word with no markdown,
+               no quotes, no code fence and no surrounding prose — they are parsed
+               exactly, and the job fails if a value is not recognised.
 
-               ```
-               breaking: no
-               <a short markdown summary of what you changed and why>
-               ```
+               File `.adapt-report/type` — one of: fix, feat, chore, docs, test,
+               refactor. This becomes the conventional-commit type, and
+               release-please uses it to decide whether to publish a release:
+               - fix: you changed library behaviour so it works with the new CLI
+               - feat: you added new public API, e.g. a builder method for a newly
+                 supported CLI option
+               - refactor: you changed code in src/ without changing behaviour
+               - test: you only changed test code, including `#[cfg(test)]` modules
+                 inside src/ — this is the right answer when a test's expected
+                 argv or output merely needed updating
+               - docs: you only changed documentation, including doc comments in
+                 src/ and the option tables in docs/claude-cli.md
+               - chore: anything else, e.g. Cargo.toml metadata
+               Pick by what you actually changed. Ignore the mechanical version-file
+               edits that were already in the tree when you started; they are not
+               yours and must not influence this choice.
 
-               Use `breaking: yes` only if you changed the public API in a way that
-               would break a dependent crate (removing or renaming a `pub` item, or
-               changing its signature). Adding a `pub` item is not breaking.
+               File `.adapt-report/breaking` — the single word yes or no. Answer yes
+               only if a dependent crate would fail to compile against your change:
+               removing or renaming a `pub` item, or changing its signature. Adding
+               a `pub` item is not breaking.
 
-            If you cannot make the tests pass, still write the report, say so
-            plainly in the summary, and leave the tree in your best state. The
-            publishing job will refuse to open a PR, which is the correct outcome.
+               File `.adapt-report/summary.md` — free-form markdown, a short summary
+               of what you changed and why. This one is prose; write it normally.
+
+            If you cannot make the verification pass, still write all three report
+            files, say so plainly in the summary, and leave the tree in your best
+            state. The publishing job will refuse to open a PR, which is the
+            correct outcome.
           claude_args: "--allowedTools Bash,Read,Edit,Write,Glob,Grep"
 
       - name: Export the adaptation
+        id: export
         shell: bash
         env:
           CLAUDE_CONCLUSION: ${{ steps.claude.outputs.conclusion }}
@@ -363,22 +395,74 @@ jobs:
             exit 1
           fi
 
+          # The report lives in the workspace so the agent is never blocked by a
+          # working-directory restriction, and is removed before staging so it
+          # cannot reach the patch or perturb the tree comparison below.
+          read_field() {
+            local file=".adapt-report/$1" value
+            if [ ! -f "$file" ]; then
+              echo "::error::The agent did not write .adapt-report/$1" >&2
+              return 1
+            fi
+            # Trim whitespace; anything else is rejected by the caller's allowlist.
+            value=$(tr -d '[:space:]' < "$file")
+            printf '%s' "$value"
+          }
+
+          TYPE=$(read_field type)
+          BREAKING=$(read_field breaking)
+          cp .adapt-report/summary.md "$RUNNER_TEMP/adapt-summary.md" 2>/dev/null || true
+
+          case "$TYPE" in
+            fix|feat|chore|docs|test|refactor) ;;
+            *) echo "::error::Unrecognised .adapt-report/type: '$TYPE'"; exit 1 ;;
+          esac
+          case "$BREAKING" in
+            yes|no) ;;
+            *) echo "::error::Unrecognised .adapt-report/breaking: '$BREAKING'"; exit 1 ;;
+          esac
+          if [ ! -s "$RUNNER_TEMP/adapt-summary.md" ]; then
+            echo "::error::The agent did not write .adapt-report/summary.md"
+            exit 1
+          fi
+
+          rm -rf .adapt-report
+
           git add -A
           if [ "$(git write-tree)" = "$MECHANICAL_TREE" ]; then
             echo "::error::The agent changed nothing beyond the mechanical version bump"
             exit 1
           fi
 
+          # Cross-check the declaration against the diff. `src/lib.rs` always
+          # carries the mechanical TESTED_CLI_VERSION line, so it is compared with
+          # that exact line excluded — matching on the substring alone would also
+          # erase real code that merely mentions the constant, of which src/client.rs
+          # has several lines.
+          SRC_OTHER=$(git diff --cached --name-only --no-renames -- src/ | grep -v '^src/lib\.rs$' || true)
+          LIBRS_OTHER=$(git diff --cached -U0 --no-renames -- src/lib.rs \
+            | grep -E '^[+-]' \
+            | grep -vE '^(\+\+\+|---)' \
+            | grep -vE '^[+-]pub const TESTED_CLI_VERSION: &str = "[0-9]+\.[0-9]+\.[0-9]+";$' \
+            || true)
+
+          if [ -n "$SRC_OTHER" ] || [ -n "$LIBRS_OTHER" ]; then
+            case "$TYPE" in
+              chore)
+                echo "::error::Reported type '$TYPE' but src/ changed beyond the version bump"
+                exit 1
+                ;;
+            esac
+          fi
+
+          {
+            echo "type=$TYPE"
+            echo "breaking=$BREAKING"
+          } >> "$GITHUB_OUTPUT"
+
           # Diff against the base commit, not the index, so the export is still
           # correct if the agent committed its work instead of leaving it staged.
           git diff --binary "$BASE_SHA" > "$RUNNER_TEMP/adapt.patch"
-
-          # A missing report means the agent did not finish its contract. It must
-          # not be silently replaced with a permissive default.
-          if [ ! -s "$RUNNER_TEMP/adapt-summary.md" ]; then
-            echo "::error::The agent did not write $RUNNER_TEMP/adapt-summary.md"
-            exit 1
-          fi
 
       - uses: actions/upload-artifact@v4
         with:
@@ -434,14 +518,20 @@ jobs:
         env:
           CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
         run: |
+          # `ci.yml` never runs on the resulting PR, so this stands in for it and
+          # covers the same feature sets. `structured` is non-default, so plain
+          # `cargo test` would not compile the whole crate.
           cargo fmt --check
           cargo clippy --all-features -- -D warnings
+          cargo clippy --no-default-features -- -D warnings
           cargo test --all-features
+          cargo test --no-default-features
           cargo test --all-features -- --ignored
 
   publish-adaptation:
     name: Publish adaptation
-    needs: [detect-version, verify-adaptation]
+    # `adapt` is needed for its declared change type as well as for ordering.
+    needs: [detect-version, adapt, verify-adaptation]
     runs-on: ubuntu-latest
     timeout-minutes: 15
     permissions:
@@ -470,35 +560,30 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           NEW_VERSION: ${{ needs.detect-version.outputs.new_version }}
           OLD_VERSION: ${{ needs.detect-version.outputs.old_version }}
+          CHANGE_TYPE: ${{ needs.adapt.outputs.change_type }}
+          BREAKING: ${{ needs.adapt.outputs.breaking }}
         run: |
           BRANCH="cli-upgrade/adapt"
-          SUMMARY_FILE="$RUNNER_TEMP/adapt/adapt-summary.md"
+          SUMMARY=$(cat "$RUNNER_TEMP/adapt/adapt-summary.md")
 
-          BREAKING=no
-          if head -n1 "$SUMMARY_FILE" | grep -qiE '^breaking:[[:space:]]*yes'; then
-            BREAKING=yes
-          fi
-          SUMMARY=$(tail -n +2 "$SUMMARY_FILE")
-
-          # The version files always touch src/lib.rs, so "did src/ change" is
-          # always true and cannot select the commit type. Ask instead whether
-          # src/ changed BEYOND that mechanical bump — that is what decides
-          # whether release-please should cut a release.
-          SRC_CHANGES=$(git diff --cached -U0 -- src/ \
-            | grep -E '^[+-]' \
-            | grep -vE '^(\+\+\+|---)' \
-            | grep -v 'TESTED_CLI_VERSION' \
-            || true)
+          # The type is declared by the agent and validated against an allowlist in
+          # `adapt`. Deriving it from the diff instead cannot work: unit tests and
+          # doc comments live inside src/, so a test-only or comment-only edit is
+          # indistinguishable from a behaviour change by path alone.
+          case "$CHANGE_TYPE" in
+            fix|feat|chore|docs|test|refactor) ;;
+            *) echo "::error::Unrecognised change type: '$CHANGE_TYPE'"; exit 1 ;;
+          esac
+          case "$BREAKING" in
+            yes|no) ;;
+            *) echo "::error::Unrecognised breaking flag: '$BREAKING'"; exit 1 ;;
+          esac
 
           if [ "$BREAKING" = "yes" ]; then
-            TYPE='feat!'
-          elif [ -n "$SRC_CHANGES" ]; then
-            TYPE='fix'
+            SUBJECT="$CHANGE_TYPE!: adapt to CLI v$NEW_VERSION (#7)"
           else
-            TYPE='chore'
+            SUBJECT="$CHANGE_TYPE: adapt to CLI v$NEW_VERSION (#7)"
           fi
-
-          SUBJECT="$TYPE: adapt to CLI v$NEW_VERSION (#7)"
 
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
