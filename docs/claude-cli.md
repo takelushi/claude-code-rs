@@ -208,22 +208,44 @@ The `cli-version-check.yml` workflow runs on manual dispatch (`workflow_dispatch
 1. Runs `cargo test`, `cargo clippy`, and the E2E tests against the new CLI
 2. Diffs `claude --help` output against `.claude-cli-help-output`
 
-The result selects one of two **mutually exclusive** jobs, so a run always produces exactly one PR:
+The result selects one of two **mutually exclusive** paths:
 
-| Outcome | Job | PR contents |
+| Outcome | Path | PR contents |
 | --- | --- | --- |
-| Tests failed and/or `--help` changed | `adapt` | Version files plus the code and documentation changes needed to adapt, in a single commit produced by `claude-code-action` |
+| Tests failed and/or `--help` changed | `adapt` → `publish-adapt` | Version files plus the code and documentation changes needed to adapt, in a single commit |
 | Both clean | `version-bump` | Version files only |
 
-Version files are `.claude-cli-version`, `.claude-cli-help-output`, `TESTED_CLI_VERSION` in `src/lib.rs`, and `README.md`. Both paths write them through the shared composite action `.github/actions/update-cli-version-files`, so the two jobs cannot drift apart.
+Version files are `.claude-cli-version`, `.claude-cli-help-output`, `TESTED_CLI_VERSION` in `src/lib.rs`, the version in `README.md`, and the option-table stamp in this file. Every job that touches the CLI goes through the shared composite action `.github/actions/update-cli-version-files` — including the `check-options` comparison capture — so the recorded baseline and the value it is compared against cannot be normalized differently.
 
 The property that matters is that the version files are **always committed together with whatever adaptation they require**. If a bump could land on its own, the next run would detect no version change and silently drop any unmerged fixes.
 
 `adapt` receives both the test log and the `--help` diff, because they are usually two symptoms of the same upgrade — a renamed option breaks tests and changes the help output at once. Giving one agent both keeps the evidence together and avoids two PRs editing the same files.
 
+### Why the agent cannot publish its own work
+
+`adapt` runs with `contents: read`. The agent edits the working tree and writes a report; it cannot commit, push, or open a PR. `publish-adapt` then applies those changes to a fresh checkout, runs `cargo fmt --check`, clippy, the test suite and the E2E tests **against the CLI version being adopted**, and only then commits and opens the PR.
+
+This exists because automated PRs do not trigger `ci.yml` — GitHub deliberately does not start workflows from events raised with `GITHUB_TOKEN` — so `publish-adapt` is the only gate the adaptation ever passes through. It also keeps repository write access out of a process whose prompt contains third-party tool output.
+
+`publish-adapt` picks the commit type from what actually changed, because release-please reads it:
+
+| Condition | Type |
+| --- | --- |
+| The agent reported a public API break | `feat!:` (minor bump pre-1.0) |
+| `src/` changed beyond the mechanical `TESTED_CLI_VERSION` line | `fix:` |
+| Documentation only | `chore:` |
+
+### Operational notes
+
 All PRs target `develop`. The workflow uses Max plan authentication (`CLAUDE_CODE_OAUTH_TOKEN`).
 
-To prevent PR/branch proliferation across repeated runs, each job uses a persistent branch (`cli-upgrade/adapt`, `cli-upgrade/version-bump`) and force-pushes on every run. If an open PR already exists for the branch, its title/body is updated with the latest version info; otherwise a new PR is created.
+To prevent PR/branch proliferation, each path uses a persistent branch (`cli-upgrade/adapt`, `cli-upgrade/version-bump`) and force-pushes on every run. If an open PR already exists for the branch its title and body are updated; otherwise a new PR is created. Whichever path runs also closes the other path's open PR, so at most one is open at a time — a stale sibling merged later could otherwise roll the tracked version backwards.
+
+**Do not push to these branches.** A force-push on the next run discards any commits added by hand, along with review approvals. Merge or close the PR instead.
+
+A job-level failure — a timeout, an npm outage, a hung E2E test — deliberately produces **no** PR rather than a partially verified one. The signal in that case is the red workflow run.
+
+Because local actions (`uses: ./…`) resolve from the checked-out workspace, and every job checks out `develop`, changes to this workflow cannot be exercised until `.github/actions/` exists on `develop`. A dispatch from a feature branch fails when the composite action cannot be found.
 
 Tracked files in the repository root:
 

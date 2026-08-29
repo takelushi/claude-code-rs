@@ -1,43 +1,88 @@
-name: Update CLI version files
+name: Sync Claude CLI version
 description: >-
-  Install a Claude CLI version and refresh every file that records it.
-  Shared by the adapt and version-bump jobs so the two paths can never drift.
+  Install a Claude CLI version, capture its normalized --help output, and
+  optionally refresh every tracked file that records the version. Every job that
+  touches the CLI goes through this action so the capture and the recorded
+  baseline cannot drift apart.
 
 inputs:
   version:
     description: CLI version to install and record
     required: true
+  help-output-path:
+    description: Where to write the normalized `claude --help` capture
+    required: false
+    default: .claude-cli-help-output
+  update-version-files:
+    description: >-
+      Whether to rewrite the tracked version files. Set to 'false' by callers
+      that only need the CLI installed and the help output captured.
+    required: false
+    default: 'true'
 
 runs:
   using: composite
   steps:
-    - name: Install CLI version
-      shell: bash
-      run: npm install -g @anthropic-ai/claude-code@${{ inputs.version }}
-
-    - name: Update tracked version files
+    # `required: true` is not enforced for composite action inputs, and this
+    # action is reusable, so it validates rather than trusting its callers.
+    - name: Validate version
       shell: bash
       env:
-        NEW_VERSION: ${{ inputs.version }}
+        VERSION: ${{ inputs.version }}
       run: |
-        echo "$NEW_VERSION" > .claude-cli-version
+        if [[ ! $VERSION =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+          echo "::error::Invalid CLI version: '$VERSION'"
+          exit 1
+        fi
 
-        claude --help | sed 's/\x1b\[[^a-zA-Z]*[a-zA-Z]//g' > .claude-cli-help-output
-        if [ ! -s .claude-cli-help-output ]; then
+    - name: Install CLI version
+      shell: bash
+      env:
+        VERSION: ${{ inputs.version }}
+      run: npm install -g "@anthropic-ai/claude-code@$VERSION"
+
+    - name: Capture normalized help output
+      shell: bash
+      env:
+        HELP_PATH: ${{ inputs.help-output-path }}
+      run: |
+        # Strip ANSI escape sequences so the capture is stable across runners.
+        claude --help | sed 's/\x1b\[[^a-zA-Z]*[a-zA-Z]//g' > "$HELP_PATH"
+        if [ ! -s "$HELP_PATH" ]; then
           echo "::error::claude --help produced no output"
           exit 1
         fi
 
-        # sed exits 0 when a pattern does not match, so verify each substitution.
-        # Otherwise a format change in these files silently skips the update.
-        sed -i "s/TESTED_CLI_VERSION: &str = \".*\"/TESTED_CLI_VERSION: \&str = \"$NEW_VERSION\"/" src/lib.rs
-        if ! grep -q "TESTED_CLI_VERSION: &str = \"$NEW_VERSION\"" src/lib.rs; then
+    - name: Update tracked version files
+      if: inputs.update-version-files == 'true'
+      shell: bash
+      env:
+        VERSION: ${{ inputs.version }}
+      run: |
+        echo "$VERSION" > .claude-cli-version
+
+        # Every pattern below is anchored and uses a negated character class
+        # rather than `.*`. A greedy `.*` would swallow the rest of the line
+        # (a trailing `;`, a comment, a second marker pair) while still leaving
+        # the needle the verification greps for — so the guard would pass on a
+        # corrupted file. `sed` also exits 0 when nothing matched, hence the
+        # `grep -qF` after each substitution.
+        sed -i "s/^pub const TESTED_CLI_VERSION: &str = \"[^\"]*\";\$/pub const TESTED_CLI_VERSION: \&str = \"$VERSION\";/" src/lib.rs
+        if ! grep -qF "pub const TESTED_CLI_VERSION: &str = \"$VERSION\";" src/lib.rs; then
           echo "::error::Failed to update TESTED_CLI_VERSION in src/lib.rs"
           exit 1
         fi
 
-        sed -i "s|<!-- cli-version -->.*<!-- /cli-version -->|<!-- cli-version -->**v$NEW_VERSION**<!-- /cli-version -->|" README.md
-        if ! grep -qF "<!-- cli-version -->**v$NEW_VERSION**<!-- /cli-version -->" README.md; then
+        sed -i "s|<!-- cli-version -->[^<]*<!-- /cli-version -->|<!-- cli-version -->**v$VERSION**<!-- /cli-version -->|g" README.md
+        if ! grep -qF "<!-- cli-version -->**v$VERSION**<!-- /cli-version -->" README.md; then
           echo "::error::Failed to update CLI version marker in README.md"
+          exit 1
+        fi
+
+        # The option support tables are only trustworthy for the version whose
+        # --help produced them, so the stamp moves with the rest.
+        sed -i "s|as of v[0-9]\+\.[0-9]\+\.[0-9]\+|as of v$VERSION|" docs/claude-cli.md
+        if ! grep -qF "as of v$VERSION" docs/claude-cli.md; then
+          echo "::error::Failed to update the option table version stamp in docs/claude-cli.md"
           exit 1
         fi

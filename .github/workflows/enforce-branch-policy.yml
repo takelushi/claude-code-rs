@@ -10,8 +10,12 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Verify PR is from develop or release-please
+        # `github.head_ref` is attacker-controlled on a fork PR and git allows
+        # shell metacharacters in branch names, so it must reach the script as an
+        # environment variable rather than being interpolated into the source.
+        env:
+          HEAD: ${{ github.head_ref }}
         run: |
-          HEAD="${{ github.head_ref }}"
           if [ "$HEAD" = "develop" ] || [[ "$HEAD" == release-please--* ]]; then
             echo "Allowed source branch: $HEAD"
           else

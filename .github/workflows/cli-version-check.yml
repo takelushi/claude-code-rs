@@ -7,16 +7,22 @@ concurrency:
   group: cli-version-check
   # Jobs force-push branches and create PRs. Cancelling mid-write can leave a
   # branch or PR in an inconsistent state, so let an in-flight run finish.
+  # (A third dispatch still cancels the queued run, which is harmless here.)
   cancel-in-progress: false
 
 # Least privilege by default; write access is granted per job below.
 permissions:
   contents: read
 
+# Every job checks out `develop`, and local actions (`uses: ./…`) resolve from the
+# checked-out workspace rather than from the ref the workflow came from. This
+# workflow therefore only runs once `.github/actions/` exists on `develop`, which
+# means it cannot be smoke-tested from a feature branch.
 jobs:
   detect-version:
     name: Detect CLI version change
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     outputs:
       version_changed: ${{ steps.compare.outputs.changed }}
       new_version: ${{ steps.compare.outputs.new_version }}
@@ -31,7 +37,10 @@ jobs:
         shell: bash
         run: |
           NEW_VERSION=$(npm view @anthropic-ai/claude-code version)
-          if ! printf '%s' "$NEW_VERSION" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+$'; then
+          # `[[ =~ ]]` matches the whole string. A `grep -E '^…$'` here would
+          # anchor per line, so a multi-line value would pass and then inject
+          # extra `key=value` lines into $GITHUB_OUTPUT.
+          if [[ ! $NEW_VERSION =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
             echo "::error::Unexpected version string from npm: '$NEW_VERSION'"
             exit 1
           fi
@@ -44,7 +53,7 @@ jobs:
           OLD_VERSION=$(cat .claude-cli-version)
           NEW_VERSION="${{ steps.npm.outputs.version }}"
 
-          if ! printf '%s' "$OLD_VERSION" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+$'; then
+          if [[ ! $OLD_VERSION =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
             echo "::error::Malformed .claude-cli-version: '$OLD_VERSION'"
             exit 1
           fi
@@ -85,8 +94,11 @@ jobs:
 
       - uses: Swatinem/rust-cache@v2
 
-      - name: Install new CLI version
-        run: npm install -g @anthropic-ai/claude-code@${{ needs.detect-version.outputs.new_version }}
+      - uses: ./.github/actions/update-cli-version-files
+        with:
+          version: ${{ needs.detect-version.outputs.new_version }}
+          update-version-files: 'false'
+          help-output-path: ${{ runner.temp }}/help-ignored.txt
 
       - name: Run tests, clippy, and E2E tests
         id: test-result
@@ -99,32 +111,49 @@ jobs:
           LOG_FILE=$(mktemp)
           FAILED=false
 
-          echo "=== cargo test ===" >> "$LOG_FILE"
-          if ! cargo test 2>&1 | tee -a "$LOG_FILE"; then
-            FAILED=true
-          fi
+          # Each section is truncated independently. A single tail over the whole
+          # log would keep only the last section, so a unit-test failure could be
+          # flushed out by a noisy E2E run that followed it.
+          run_section() {
+            local name="$1"
+            shift
+            local section
+            section=$(mktemp)
 
-          echo "" >> "$LOG_FILE"
-          echo "=== cargo clippy ===" >> "$LOG_FILE"
-          if ! cargo clippy -- -D warnings 2>&1 | tee -a "$LOG_FILE"; then
-            FAILED=true
-          fi
+            if ! "$@" > "$section" 2>&1; then
+              FAILED=true
+            fi
+            cat "$section"
 
-          echo "" >> "$LOG_FILE"
-          echo "=== cargo test (E2E) ===" >> "$LOG_FILE"
-          if ! cargo test -- --ignored 2>&1 | tee -a "$LOG_FILE"; then
-            FAILED=true
-          fi
+            {
+              echo "=== $name ==="
+              if [ "$(wc -c < "$section")" -gt 30000 ]; then
+                head -c 15000 "$section"
+                printf '\n[... truncated ...]\n'
+                tail -c 15000 "$section"
+              else
+                cat "$section"
+              fi
+              echo ""
+            } | iconv -c -f utf-8 -t utf-8 >> "$LOG_FILE"
+          }
+
+          run_section "cargo test" cargo test
+          run_section "cargo clippy" cargo clippy -- -D warnings
+          run_section "cargo test (E2E)" cargo test -- --ignored
 
           echo "failed=$FAILED" >> "$GITHUB_OUTPUT"
 
-          # Keep the tail: cargo reports failure details at the end of the log.
-          # Job outputs are capped at ~1MB, so stay well below it.
-          LOG=$(tail -c 100000 "$LOG_FILE")
+          # Job outputs are capped at 1MB per job, measured in UTF-16 — i.e. two
+          # bytes per ASCII character — so the cap is reached at ~500KB of log.
+          # A fixed delimiter would let a matching line in the log terminate the
+          # value early and forge further outputs, so randomise it.
+          LOG=$(cat "$LOG_FILE")
+          DELIM="TESTLOG_EOF_$(openssl rand -hex 16)"
           {
-            echo "log<<TESTLOG_EOF"
+            echo "log<<$DELIM"
             echo "$LOG"
-            echo "TESTLOG_EOF"
+            echo "$DELIM"
           } >> "$GITHUB_OUTPUT"
 
   check-options:
@@ -132,6 +161,7 @@ jobs:
     needs: detect-version
     if: needs.detect-version.outputs.version_changed == 'true'
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     outputs:
       options_changed: ${{ steps.diff.outputs.changed }}
       options_diff: ${{ steps.diff.outputs.diff }}
@@ -140,37 +170,46 @@ jobs:
         with:
           ref: develop
 
-      - name: Install new CLI version
-        run: npm install -g @anthropic-ai/claude-code@${{ needs.detect-version.outputs.new_version }}
+      # Captured through the same action that writes the committed baseline, so
+      # the comparison and the baseline can never be normalised differently.
+      - uses: ./.github/actions/update-cli-version-files
+        with:
+          version: ${{ needs.detect-version.outputs.new_version }}
+          update-version-files: 'false'
+          help-output-path: ${{ runner.temp }}/claude-help-new.txt
 
-      - name: Capture and diff help output
+      - name: Diff help output
         id: diff
         shell: bash
         run: |
-          # Capture new help output, stripping ANSI escape sequences.
-          # stderr is kept: a failing `claude --help` must not look like an empty diff.
-          claude --help | sed 's/\x1b\[[^a-zA-Z]*[a-zA-Z]//g' > /tmp/claude-help-new.txt
+          set +e
+          diff .claude-cli-help-output "$RUNNER_TEMP/claude-help-new.txt" \
+            > "$RUNNER_TEMP/help-diff.txt" 2> "$RUNNER_TEMP/help-diff.err"
+          rc=$?
+          set -e
 
-          # An empty capture would diff as "everything removed" and start the
-          # billable update-options agent job for nothing.
-          if [ ! -s /tmp/claude-help-new.txt ]; then
-            echo "::error::claude --help produced no output"
+          # diff exits 2 on error (missing/unreadable baseline). Treating that as
+          # "changed" would start the billable adapt job with an error string as
+          # its diff.
+          if [ "$rc" -ge 2 ]; then
+            echo "::error::diff failed: $(cat "$RUNNER_TEMP/help-diff.err")"
             exit 1
           fi
 
-          if diff .claude-cli-help-output /tmp/claude-help-new.txt > /tmp/help-diff.txt 2>&1; then
+          if [ "$rc" -eq 0 ]; then
             echo "changed=false" >> "$GITHUB_OUTPUT"
           else
             echo "changed=true" >> "$GITHUB_OUTPUT"
           fi
 
-          # Keep the head here: a diff reads top-down and the earliest hunks
+          # Keep the head: a diff reads top-down and the earliest hunks
           # correspond to the start of the help output.
-          DIFF=$(head -c 100000 /tmp/help-diff.txt)
+          DIFF=$(head -c 100000 "$RUNNER_TEMP/help-diff.txt" | iconv -c -f utf-8 -t utf-8)
+          DELIM="HELPDIFF_EOF_$(openssl rand -hex 16)"
           {
-            echo "diff<<HELPDIFF_EOF"
+            echo "diff<<$DELIM"
             echo "$DIFF"
-            echo "HELPDIFF_EOF"
+            echo "$DELIM"
           } >> "$GITHUB_OUTPUT"
 
   adapt:
@@ -178,17 +217,19 @@ jobs:
     needs: [detect-version, run-tests, check-options]
     # Runs when the upgrade actually requires a change. Test failures and `--help`
     # changes are two symptoms of one upgrade, so a single agent handles both with
-    # the full evidence in front of it, and produces a single PR that cannot
-    # conflict with a sibling. Without always(), this is implicitly also gated on
-    # both checks having succeeded.
+    # the full evidence in front of it. Without always(), this is implicitly also
+    # gated on both checks having succeeded — a job-level failure (timeout, npm
+    # outage) deliberately produces no PR at all rather than a half-verified one.
     if: |
       needs.run-tests.outputs.tests_failed == 'true' ||
       needs.check-options.outputs.options_changed == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    # The agent gets NO write access. It edits the working tree; publish-adapt
+    # verifies the result and is the only job that can commit or push.
     permissions:
-      contents: write
-      pull-requests: write
+      contents: read
+      pull-requests: read
       id-token: write
     steps:
       - uses: actions/checkout@v6
@@ -215,10 +256,19 @@ jobs:
             Claude CLI has been upgraded from ${{ needs.detect-version.outputs.old_version }} to ${{ needs.detect-version.outputs.new_version }}, and this library needs to be adapted to it.
 
             The version files (`.claude-cli-version`, `.claude-cli-help-output`,
-            `TESTED_CLI_VERSION` in `src/lib.rs`, and `README.md`) have ALREADY been
-            updated in the working tree. Leave those edits as they are and include
-            them in your commit — the adaptation and the version bump must land
-            together, otherwise the next run sees no change and the work is lost.
+            `TESTED_CLI_VERSION` in `src/lib.rs`, `README.md`, and the version stamp
+            in `docs/claude-cli.md`) have ALREADY been updated in the working tree.
+            Leave those edits exactly as they are.
+
+            DO NOT commit, DO NOT push, and DO NOT create a pull request. You have
+            no write access to the repository. Leave your changes in the working
+            tree; a separate job verifies them and publishes them for you.
+
+            Note that `claude` on PATH is the version this action installed for its
+            own use, NOT ${{ needs.detect-version.outputs.new_version }}. Do not run
+            `cargo test -- --ignored`; those E2E tests spawn the real binary and
+            would validate against the wrong CLI. The publishing job runs them
+            against the correct version.
 
             Test suite: ${{ needs.run-tests.outputs.tests_failed == 'true' && 'FAILED' || 'passed' }}
             `--help` output: ${{ needs.check-options.outputs.options_changed == 'true' && 'CHANGED' || 'unchanged' }}
@@ -229,15 +279,15 @@ jobs:
 
             Test log:
 
-            ```
+            ~~~~
             ${{ needs.run-tests.outputs.tests_failed == 'true' && needs.run-tests.outputs.test_log || '(tests passed; nothing to fix here)' }}
-            ```
+            ~~~~
 
             `--help` diff:
 
-            ```
+            ~~~~
             ${{ needs.check-options.outputs.options_changed == 'true' && needs.check-options.outputs.options_diff || '(help output unchanged)' }}
-            ```
+            ~~~~
 
             Your task:
             1. Read docs/claude-cli.md — the "Updating for New CLI Versions" checklist
@@ -248,22 +298,181 @@ jobs:
                - EXISTING option changes (renamed/removed/behavior changed): update
                  code in src/ and docs/claude-cli.md
                - NEW options: classify them into the appropriate table in docs/claude-cli.md
-            3. Run `cargo test`, `cargo clippy -- -D warnings`, and `cargo fmt` to verify
-            4. Commit EVERYTHING — your changes plus the pre-updated version files — in
-               ONE commit. Pick the type by what you touched, because release-please
-               reads it to decide the next version:
-               - Anything under `src/` changed: `fix: adapt to CLI v${{ needs.detect-version.outputs.new_version }} (#7)`
-               - Documentation only: `chore: adapt to CLI v${{ needs.detect-version.outputs.new_version }} (#7)`
-            5. Force-push to the persistent branch `cli-upgrade/adapt`:
-               `git push --force origin HEAD:cli-upgrade/adapt`
-            6. Check for an existing open PR on that branch and update-or-create:
-               - `PR=$(gh pr list --head cli-upgrade/adapt --state open --json number --jq '.[0].number // empty')`
-               - If `$PR` is non-empty: `gh pr edit "$PR" --title "<title>" --body "<body>"`
-               - Else: `gh pr create --base develop --head cli-upgrade/adapt --title "<title>" --body "<body>"`
+            3. Verify with `cargo test`, `cargo clippy -- -D warnings`, and `cargo fmt`
+            4. Write a report to `${{ runner.temp }}/adapt-summary.md` with EXACTLY
+               this shape — the publishing job parses the first line:
 
-            Use the commit subject as the PR title. In the PR body, summarize what
-            changed and why, and end with `Refs #7`.
+               ```
+               breaking: no
+               <a short markdown summary of what you changed and why>
+               ```
+
+               Use `breaking: yes` only if you changed the public API in a way that
+               would break a dependent crate (removing or renaming a `pub` item, or
+               changing its signature). Adding a `pub` item is not breaking.
+
+            If you cannot make the tests pass, still write the report, say so
+            plainly in the summary, and leave the tree in your best state. The
+            publishing job will refuse to open a PR, which is the correct outcome.
           claude_args: "--allowedTools Bash,Read,Edit,Write,Glob,Grep"
+
+      - name: Export working tree changes
+        id: export
+        shell: bash
+        run: |
+          git add -A
+          if git diff --cached --quiet; then
+            echo "::error::The agent produced no changes at all"
+            exit 1
+          fi
+          git diff --cached --binary > "$RUNNER_TEMP/adapt.patch"
+
+          if [ ! -f "$RUNNER_TEMP/adapt-summary.md" ]; then
+            printf 'breaking: no\nThe agent did not write a summary.\n' \
+              > "$RUNNER_TEMP/adapt-summary.md"
+          fi
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: adapt-result
+          path: |
+            ${{ runner.temp }}/adapt.patch
+            ${{ runner.temp }}/adapt-summary.md
+          retention-days: 7
+
+  publish-adapt:
+    name: Verify and publish adaptation
+    needs: [detect-version, adapt]
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: develop
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+
+      - uses: Swatinem/rust-cache@v2
+
+      # Installs the CLI the adaptation targets, so the E2E tests below run
+      # against the right binary rather than whatever the agent action installed.
+      - uses: ./.github/actions/update-cli-version-files
+        with:
+          version: ${{ needs.detect-version.outputs.new_version }}
+          update-version-files: 'false'
+          help-output-path: ${{ runner.temp }}/help-ignored.txt
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: adapt-result
+          path: ${{ runner.temp }}/adapt
+
+      - name: Apply the agent's changes
+        shell: bash
+        run: git apply --index "$RUNNER_TEMP/adapt/adapt.patch"
+
+      # The whole point of this job: the adaptation is proven before anything is
+      # published, rather than resting on the agent's own report. Automated PRs
+      # do not trigger `ci.yml`, so this is the only gate that exists.
+      - name: Verify the adaptation
+        shell: bash
+        env:
+          CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+        run: |
+          cargo fmt --check
+          cargo clippy --all-features -- -D warnings
+          cargo test --all-features
+          cargo test --all-features -- --ignored
+
+      - name: Create or update PR
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          NEW_VERSION: ${{ needs.detect-version.outputs.new_version }}
+          OLD_VERSION: ${{ needs.detect-version.outputs.old_version }}
+        run: |
+          BRANCH="cli-upgrade/adapt"
+          SUMMARY_FILE="$RUNNER_TEMP/adapt/adapt-summary.md"
+
+          BREAKING=no
+          if head -n1 "$SUMMARY_FILE" | grep -qiE '^breaking:[[:space:]]*yes'; then
+            BREAKING=yes
+          fi
+          SUMMARY=$(tail -n +2 "$SUMMARY_FILE")
+
+          # The version files always touch src/lib.rs, so "did src/ change" is
+          # always true and cannot select the commit type. Ask instead whether
+          # src/ changed BEYOND that mechanical bump — that is what decides
+          # whether release-please should cut a release.
+          SRC_CHANGES=$(git diff --cached -U0 -- src/ \
+            | grep -E '^[+-]' \
+            | grep -vE '^(\+\+\+|---)' \
+            | grep -v 'TESTED_CLI_VERSION' \
+            || true)
+
+          if [ "$BREAKING" = "yes" ]; then
+            TYPE='feat!'
+          elif [ -n "$SRC_CHANGES" ]; then
+            TYPE='fix'
+          else
+            TYPE='chore'
+          fi
+
+          SUBJECT="$TYPE: adapt to CLI v$NEW_VERSION (#7)"
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git checkout -b "$BRANCH"
+
+          if [ "$BREAKING" = "yes" ]; then
+            git commit -m "$SUBJECT" -m "BREAKING CHANGE: the public API changed to follow CLI v$NEW_VERSION."
+          else
+            git commit -m "$SUBJECT"
+          fi
+
+          git push --force origin "$BRANCH"
+
+          PR_BODY=$(cat <<PRBODY
+          ## Summary
+
+          Adapts the library to Claude CLI v$OLD_VERSION -> v$NEW_VERSION, and records
+          the new version in the same commit.
+
+          $SUMMARY
+
+          ## Verification
+
+          \`cargo fmt --check\`, \`cargo clippy --all-features -- -D warnings\`,
+          \`cargo test --all-features\`, and the E2E tests all passed against
+          CLI v$NEW_VERSION before this PR was opened.
+
+          > **Do not push to this branch.** It is force-overwritten on every workflow
+          > run. Merge or close this PR instead.
+
+          Refs #7
+          PRBODY
+          )
+
+          PR_NUMBER=$(gh pr list --head "$BRANCH" --state open --json number --jq '.[0].number // empty')
+          if [ -n "$PR_NUMBER" ]; then
+            gh pr edit "$PR_NUMBER" --title "$SUBJECT" --body "$PR_BODY"
+          else
+            gh pr create --base develop --head "$BRANCH" --title "$SUBJECT" --body "$PR_BODY"
+          fi
+
+          # Exactly one open PR at a time, across runs as well as within one. A
+          # stale sibling could otherwise be merged after this one and roll the
+          # tracked version backwards.
+          SIBLING=$(gh pr list --head cli-upgrade/version-bump --state open --json number --jq '.[0].number // empty')
+          if [ -n "$SIBLING" ]; then
+            gh pr close "$SIBLING" --delete-branch \
+              --comment "Superseded by the adaptation PR for CLI v$NEW_VERSION."
+          fi
 
   version-bump:
     name: Create version bump PR
@@ -276,6 +485,7 @@ jobs:
       needs.run-tests.outputs.tests_failed != 'true' &&
       needs.check-options.outputs.options_changed != 'true'
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     permissions:
       contents: write
       pull-requests: write
@@ -289,8 +499,9 @@ jobs:
           version: ${{ needs.detect-version.outputs.new_version }}
 
       - name: Create or update PR
+        shell: bash
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ github.token }}
           NEW_VERSION: ${{ needs.detect-version.outputs.new_version }}
         run: |
           BRANCH="cli-upgrade/version-bump"
@@ -298,23 +509,31 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git checkout -b "$BRANCH"
-          git add .claude-cli-version .claude-cli-help-output src/lib.rs README.md
-          git commit -m "chore: bump tracked CLI version to $NEW_VERSION"
+          git add -A
 
-          # Force-push to the persistent branch (overwrites any stale commits)
+          # develop may already carry this bump if a previous PR was merged while
+          # this run was in flight. Nothing to do, and committing would fail.
+          if git diff --cached --quiet; then
+            echo "develop is already at v$NEW_VERSION; nothing to bump."
+            exit 0
+          fi
+
+          git commit -m "chore: bump tracked CLI version to $NEW_VERSION (#7)"
           git push --force origin "$BRANCH"
 
-          PR_TITLE="chore: bump tracked CLI version to $NEW_VERSION"
+          PR_TITLE="chore: bump tracked CLI version to $NEW_VERSION (#7)"
           PR_BODY=$(cat <<PRBODY
           ## Summary
 
           - Update \`.claude-cli-version\` to $NEW_VERSION
-          - Update \`.claude-cli-help-output\` with new \`--help\` output
           - Update \`TESTED_CLI_VERSION\` in \`src/lib.rs\`
-          - Update version in \`README.md\`
+          - Update the version in \`README.md\` and the option table stamp in \`docs/claude-cli.md\`
 
           The test suite passed and \`claude --help\` was unchanged for this version,
           so no code or documentation changes were needed.
+
+          > **Do not push to this branch.** It is force-overwritten on every workflow
+          > run. Merge or close this PR instead.
 
           Refs #7
           PRBODY
@@ -325,4 +544,11 @@ jobs:
             gh pr edit "$PR_NUMBER" --title "$PR_TITLE" --body "$PR_BODY"
           else
             gh pr create --base develop --head "$BRANCH" --title "$PR_TITLE" --body "$PR_BODY"
+          fi
+
+          # See the matching comment in publish-adapt: at most one open PR.
+          SIBLING=$(gh pr list --head cli-upgrade/adapt --state open --json number --jq '.[0].number // empty')
+          if [ -n "$SIBLING" ]; then
+            gh pr close "$SIBLING" --delete-branch \
+              --comment "Superseded by the version bump PR for CLI v$NEW_VERSION."
           fi
