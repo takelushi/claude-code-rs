@@ -130,7 +130,18 @@ The library addresses this by using a `ChildGuard` RAII wrapper in `ask_stream` 
 
 ## CLI Option Support Status
 
-Classification of all `claude` CLI options as of v2.1.92. The library operates in `--print` mode only.
+Classification of all `claude` CLI options as of v2.1.251. The library operates in `--print` mode only.
+
+### Option Value Changes
+
+- `--permission-mode`: the `"default"` choice was renamed to `"manual"` in CLI v2.1.251.
+  The library's `permission_mode::DEFAULT` constant was renamed to `permission_mode::MANUAL`
+  (value `"manual"`) to match.
+- `--effort`: a new `"xhigh"` level was added between `"high"` and `"max"`. Available as
+  `effort::XHIGH`.
+- `--fallback-model`: now accepts a comma-separated list of models to try in order (previously
+  a single model). The primary model is retried at the start of each user turn. No API change
+  was needed since the field/builder method already accept an arbitrary `String`.
 
 ### Supported
 
@@ -182,12 +193,17 @@ Relevant to `--print` mode but not yet implemented as builder methods. All of th
 | `--verbose` | Explicit verbose mode (auto-added for stream-json) |
 | `--debug` | Enable debug mode with optional category filtering |
 | `--debug-file` | Write debug logs to a specific file path |
+| `--autocompact` | Auto-compact window size (auto, or 100k-1M tokens) |
+| `--forward-subagent-text` | Forward subagent text/thinking blocks as assistant/user messages (only works with `--print` and `--output-format=stream-json`); added in v2.1.251 |
+| `--restricted` | Restricted mode: removes command/code-running tools and confines file tools to working directories; added in v2.1.251 |
+| `--safe-mode` | Start with all customizations (CLAUDE.md, skills, plugins, hooks, MCP servers, etc.) disabled; added in v2.1.251 |
+| `--prompt-suggestions` | Emits a `prompt_suggestion` message after each turn with a predicted next user prompt (print/SDK mode); added in v2.1.251 |
 
 ### Interactive-Only (Not Applicable)
 
 These options are for interactive CLI sessions and do not apply to `--print` mode:
 
-`--chrome`, `--no-chrome`, `--ide`, `--tmux`, `--worktree`, `--from-pr`, `--remote-control-session-name-prefix`, `--replay-user-messages`, `--plugin-dir`
+`--chrome`, `--no-chrome`, `--ide`, `--tmux`, `--worktree`, `--from-pr`, `--remote-control-session-name-prefix`, `--replay-user-messages`, `--plugin-dir`, `--plugin-url`, `--bg`/`--background`, `--cloud`, `--environment`, `--remote-control`, `--teleport`, `--ax-screen-reader`
 
 ### Managed Internally
 

@@ -82,7 +82,9 @@ pub struct ClaudeConfig {
     /// the stream yields [`ClaudeError::Timeout`](crate::ClaudeError::Timeout)
     /// and terminates. Library-only; not a CLI flag.
     pub stream_idle_timeout: Option<Duration>,
-    /// Fallback model when default is overloaded (`--fallback-model`).
+    /// Fallback model(s) to use when the default model is overloaded or unavailable
+    /// (`--fallback-model`). Accepts a comma-separated list to try each in order;
+    /// the primary model is retried at the start of each user turn.
     pub fallback_model: Option<String>,
     /// Effort level (`--effort`). Use [`effort`] constants for known values.
     pub effort: Option<String>,
@@ -552,7 +554,7 @@ impl ClaudeConfigBuilder {
         self
     }
 
-    /// Sets the fallback model.
+    /// Sets the fallback model(s). Accepts a comma-separated list to try each in order.
     #[must_use]
     pub fn fallback_model(mut self, model: impl Into<String>) -> Self {
         self.fallback_model = Some(model.into());
@@ -808,14 +810,17 @@ pub mod effort {
     pub const MEDIUM: &str = "medium";
     /// High effort.
     pub const HIGH: &str = "high";
+    /// Extra-high effort.
+    pub const XHIGH: &str = "xhigh";
     /// Maximum effort.
     pub const MAX: &str = "max";
 }
 
 /// Known values for the `--permission-mode` CLI option.
 pub mod permission_mode {
-    /// Default permission mode.
-    pub const DEFAULT: &str = "default";
+    /// Manual permission mode (prompts for each action). Formerly named `"default"`
+    /// in CLI versions prior to 2.1.251.
+    pub const MANUAL: &str = "manual";
     /// Accept edits without confirmation.
     pub const ACCEPT_EDITS: &str = "acceptEdits";
     /// Automatic permission handling.
@@ -1106,6 +1111,34 @@ mod tests {
         let args = config.to_args("test");
         let idx = args.iter().position(|a| a == "--effort").unwrap();
         assert_eq!(args[idx + 1], "ultra");
+    }
+
+    #[test]
+    fn effort_with_xhigh_constant() {
+        let config = ClaudeConfig::builder().effort(effort::XHIGH).build();
+        let args = config.to_args("test");
+        let idx = args.iter().position(|a| a == "--effort").unwrap();
+        assert_eq!(args[idx + 1], "xhigh");
+    }
+
+    #[test]
+    fn permission_mode_with_manual_constant() {
+        let config = ClaudeConfig::builder()
+            .permission_mode(permission_mode::MANUAL)
+            .build();
+        let args = config.to_args("test");
+        let idx = args.iter().position(|a| a == "--permission-mode").unwrap();
+        assert_eq!(args[idx + 1], "manual");
+    }
+
+    #[test]
+    fn fallback_model_accepts_comma_separated_list() {
+        let config = ClaudeConfig::builder()
+            .fallback_model("haiku,sonnet")
+            .build();
+        let args = config.to_args("test");
+        let idx = args.iter().position(|a| a == "--fallback-model").unwrap();
+        assert_eq!(args[idx + 1], "haiku,sonnet");
     }
 
     #[test]
