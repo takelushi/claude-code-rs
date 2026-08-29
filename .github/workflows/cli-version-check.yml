@@ -416,6 +416,12 @@ jobs:
           BASE_SHA: ${{ steps.base.outputs.sha }}
           OPTIONS_CHANGED: ${{ needs.check-options.outputs.options_changed }}
           NEW_VERSION: ${{ needs.detect-version.outputs.new_version }}
+          # Re-declared at step level on purpose. These are workflow-level `env:`,
+          # and a value the agent writes to $GITHUB_ENV would otherwise override
+          # them for this later step — letting the checked party edit the check.
+          # A step-level `env:` shadows the environment file.
+          ALLOWED_PATHS_RE: ${{ env.ALLOWED_PATHS_RE }}
+          FORBIDDEN_PATHS_RE: ${{ env.FORBIDDEN_PATHS_RE }}
         run: |
           # The action returns success without running Claude on some paths, so
           # its own conclusion is checked rather than assumed.
@@ -465,7 +471,11 @@ jobs:
           #
           # The range is the base commit, not the index, so this is correct whether
           # the agent staged its work or committed it.
-          git diff --binary "$BASE_SHA" > "$RUNNER_TEMP/adapt.patch"
+          # `--no-renames`: rename detection would encode a relocation as a single
+          # `rename from`/`rename to` pair, and `git apply --numstat` reports only
+          # the destination. The source path would then be invisible to the path
+          # checks while `git apply --index` still deleted it.
+          git diff --binary --no-renames "$BASE_SHA" > "$RUNNER_TEMP/adapt.patch"
           echo "patch_sha256=$(sha256sum "$RUNNER_TEMP/adapt.patch" | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
 
           if [ "$(git write-tree)" = "$MECHANICAL_TREE" ]; then
@@ -501,7 +511,8 @@ jobs:
           # it calls, so it is a convenience that fails fast — not the boundary.
           # publish-adaptation re-runs it on the trusted side.
           UNEXPECTED=$(changed_paths | grep -vE "$ALLOWED_PATHS_RE" || true)
-          UNEXPECTED="$UNEXPECTED$(changed_paths | grep -E "$FORBIDDEN_PATHS_RE" || true)"
+          UNEXPECTED=$(printf '%s\n%s\n' "$UNEXPECTED" \
+            "$(changed_paths | grep -E "$FORBIDDEN_PATHS_RE" || true)" | grep -v '^$' || true)
           if [ -n "$UNEXPECTED" ]; then
             echo "::error::The adaptation touches unexpected paths:"
             printf '%s\n' "$UNEXPECTED"
@@ -675,9 +686,23 @@ jobs:
       - name: Re-check the patch paths
         shell: bash
         run: |
+          # `git apply --numstat` reports only the destination of a rename, while
+          # `git apply --index` also deletes the source — so a rename out of a
+          # protected path would be invisible here. The patch is generated with
+          # `--no-renames`, but that happens on the side this check exists to
+          # distrust, so rename and copy headers are refused outright.
+          RENAMES=$(git -c core.quotePath=false apply --summary "$RUNNER_TEMP/adapt/adapt.patch" \
+            | grep -E '^ (rename|copy) ' || true)
+          if [ -n "$RENAMES" ]; then
+            echo "::error::The verified patch contains rename or copy entries, which hide their source path:"
+            printf '%s\n' "$RENAMES"
+            exit 1
+          fi
+
           PATCH_PATHS=$(git -c core.quotePath=false apply --numstat "$RUNNER_TEMP/adapt/adapt.patch" | cut -f3)
           UNEXPECTED=$(printf '%s\n' "$PATCH_PATHS" | grep -vE "$ALLOWED_PATHS_RE" || true)
-          UNEXPECTED="$UNEXPECTED$(printf '%s\n' "$PATCH_PATHS" | grep -E "$FORBIDDEN_PATHS_RE" || true)"
+          UNEXPECTED=$(printf '%s\n%s\n' "$UNEXPECTED" \
+            "$(printf '%s\n' "$PATCH_PATHS" | grep -E "$FORBIDDEN_PATHS_RE" || true)" | grep -v '^$' || true)
           if [ -n "$UNEXPECTED" ]; then
             echo "::error::The verified patch touches unexpected paths:"
             printf '%s\n' "$UNEXPECTED"
