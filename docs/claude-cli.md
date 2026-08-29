@@ -130,7 +130,7 @@ The library addresses this by using a `ChildGuard` RAII wrapper in `ask_stream` 
 
 ## CLI Option Support Status
 
-Classification of all `claude` CLI options as of v2.1.92. The library operates in `--print` mode only.
+Classification of all `claude` CLI options as of v2.1.105. The library operates in `--print` mode only.
 
 ### Supported
 
@@ -244,6 +244,11 @@ Deriving the type from the diff instead does not work in this repository. Unit t
 The diff is still used as a cross-check in the other direction: if `src/` changed beyond the mechanical `TESTED_CLI_VERSION` line but the agent declared `chore`, the job fails. That comparison excludes the constant's definition line exactly rather than by substring, because `src/client.rs` has several real lines that mention the constant.
 
 The three report files live in the workspace so that no working-directory restriction can block the agent from writing them, and are deleted before staging so they never reach the patch.
+
+`adapt` applies two further checks before exporting:
+
+- The patch may only touch `src/`, `docs/`, `tests/`, `examples/`, `README.md`, the Cargo manifests and the two tracked CLI files. `git add -A` would otherwise sweep up any scratch file left in the workspace, and nothing downstream inspects the file list before pushing it. Editing anything under `.github/` is rejected here rather than by a push failure after verification has run, since `GITHUB_TOKEN` cannot push workflow changes.
+- If `claude --help` changed, `docs/claude-cli.md` must have changed beyond its version stamp. On that path the tree was already green before the agent ran, so the cargo gate proves nothing about whether the new options were actually triaged.
 
 ### Operational notes
 

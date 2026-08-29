@@ -136,10 +136,10 @@ jobs:
 
             {
               echo "=== $name ==="
-              if [ "$(wc -c < "$section")" -gt 30000 ]; then
-                head -c 15000 "$section"
+              if [ "$(wc -c < "$section")" -gt 10000 ]; then
+                head -c 5000 "$section"
                 printf '\n[... truncated ...]\n'
-                tail -c 15000 "$section"
+                tail -c 5000 "$section"
               else
                 cat "$section"
               fi
@@ -213,7 +213,13 @@ jobs:
 
           # Keep the head: a diff reads top-down and the earliest hunks
           # correspond to the start of the help output.
-          DIFF=$(head -c 100000 "$RUNNER_TEMP/help-diff.txt" | iconv -c -f utf-8 -t utf-8)
+          #
+          # The cap matters beyond output limits: this value and the test log are
+          # both interpolated into one prompt, which claude-code-action passes as a
+          # single environment variable. Linux rejects an env entry over
+          # MAX_ARG_STRLEN (131072 bytes), so the two caps must sum well under it.
+          # 20KB here + 3 x 10KB of log leaves ample headroom.
+          DIFF=$(head -c 20000 "$RUNNER_TEMP/help-diff.txt" | iconv -c -f utf-8 -t utf-8)
           DELIM="HELPDIFF_EOF_$(openssl rand -hex 16)"
           {
             echo "diff<<$DELIM"
@@ -299,6 +305,11 @@ jobs:
             DO NOT commit, DO NOT push, and DO NOT create a pull request. You have
             no write access to the repository. Leave your changes in the working
             tree; a separate job verifies them and publishes them for you.
+
+            Do not edit anything under `.github/`. The token that publishes your
+            work cannot push workflow changes, so the push would be rejected after
+            the verification has already run. Confine yourself to `src/`, `docs/`,
+            `tests/`, `examples/`, `README.md` and the Cargo manifests.
 
             Note that `claude` on PATH is the version this action installed for its
             own use, NOT ${{ needs.detect-version.outputs.new_version }}. Do not run
@@ -387,6 +398,7 @@ jobs:
           CLAUDE_CONCLUSION: ${{ steps.claude.outputs.conclusion }}
           MECHANICAL_TREE: ${{ steps.mechanical.outputs.tree }}
           BASE_SHA: ${{ steps.base.outputs.sha }}
+          OPTIONS_CHANGED: ${{ needs.check-options.outputs.options_changed }}
         run: |
           # The action returns success without running Claude on some paths, so
           # its own conclusion is checked rather than assumed.
@@ -434,6 +446,35 @@ jobs:
             exit 1
           fi
 
+          # Only these paths may appear in the patch. `git add -A` otherwise sweeps
+          # up any scratch file left in the workspace, and nothing downstream looks
+          # at the file list before committing and pushing it.
+          UNEXPECTED=$(git diff --cached --name-only --no-renames \
+            | grep -vE '^(src/|docs/|tests/|examples/|README\.md$|Cargo\.toml$|Cargo\.lock$|\.claude-cli-version$|\.claude-cli-help-output$)' \
+            || true)
+          if [ -n "$UNEXPECTED" ]; then
+            echo "::error::The adaptation touches unexpected paths:"
+            printf '%s\n' "$UNEXPECTED"
+            exit 1
+          fi
+
+          # An option change that produced no documentation edit means the agent
+          # did not actually triage the new `--help` output. The cargo gate cannot
+          # catch this: on this path the tree was already green before the agent ran.
+          #
+          # The mechanical step always rewrites this file's "as of vX" stamp, so
+          # that line is excluded — comparing the file as a whole would make this
+          # guard unreachable.
+          DOCS_OTHER=$(git diff --cached -U0 --no-renames -- docs/claude-cli.md \
+            | grep -E '^[+-]' \
+            | grep -vE '^(\+\+\+|---)' \
+            | grep -vE '^[+-]Classification of all `claude` CLI options as of v[0-9]+\.[0-9]+\.[0-9]+\.' \
+            || true)
+          if [ "$OPTIONS_CHANGED" = "true" ] && [ -z "$DOCS_OTHER" ]; then
+            echo "::error::claude --help changed but docs/claude-cli.md was not updated beyond its version stamp"
+            exit 1
+          fi
+
           # Cross-check the declaration against the diff. `src/lib.rs` always
           # carries the mechanical TESTED_CLI_VERSION line, so it is compared with
           # that exact line excluded — matching on the substring alone would also
@@ -464,9 +505,13 @@ jobs:
           # correct if the agent committed its work instead of leaving it staged.
           git diff --binary "$BASE_SHA" > "$RUNNER_TEMP/adapt.patch"
 
+      # `if: always()` so a failed export still leaves the agent's work and report
+      # behind; otherwise a run that burned the full agent budget is unrecoverable.
       - uses: actions/upload-artifact@v4
+        if: always()
         with:
           name: adapt-result
+          if-no-files-found: ignore
           path: |
             ${{ runner.temp }}/adapt.patch
             ${{ runner.temp }}/adapt-summary.md
@@ -671,10 +716,23 @@ jobs:
           git checkout -b "$BRANCH"
           git add -A
 
+          # See the matching comment in publish-adaptation: at most one open PR.
+          # This runs before the early exit below, which would otherwise leave a
+          # stale adapt PR open and mergeable.
+          close_sibling() {
+            local pr
+            pr=$(gh pr list --head cli-upgrade/adapt --state open --json number --jq '.[0].number // empty')
+            if [ -n "$pr" ]; then
+              gh pr close "$pr" --delete-branch \
+                --comment "Superseded by the version bump PR for CLI v$NEW_VERSION."
+            fi
+          }
+
           # develop may already carry this bump if a previous PR was merged while
           # this run was in flight. Nothing to do, and committing would fail.
           if git diff --cached --quiet; then
             echo "develop is already at v$NEW_VERSION; nothing to bump."
+            close_sibling
             exit 0
           fi
 
@@ -706,9 +764,4 @@ jobs:
             gh pr create --base develop --head "$BRANCH" --title "$PR_TITLE" --body "$PR_BODY"
           fi
 
-          # See the matching comment in publish-adapt: at most one open PR.
-          SIBLING=$(gh pr list --head cli-upgrade/adapt --state open --json number --jq '.[0].number // empty')
-          if [ -n "$SIBLING" ]; then
-            gh pr close "$SIBLING" --delete-branch \
-              --comment "Superseded by the version bump PR for CLI v$NEW_VERSION."
-          fi
+          close_sibling
