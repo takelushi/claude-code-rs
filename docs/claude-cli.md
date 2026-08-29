@@ -245,7 +245,7 @@ The diff is still used as a cross-check in the other direction: if `src/` change
 
 The three report files live in the workspace so that no working-directory restriction can block the agent from writing them, and are deleted before staging so they never reach the patch.
 
-`adapt` applies two further checks before exporting:
+`adapt` exports the patch first, so a failed check still leaves the agent's work in the artifact, and then applies five checks — that the agent changed something beyond the mechanical bump, that it did not revert the bump, and the three below:
 
 - The patch may only touch `src/`, `docs/`, `tests/`, `examples/`, `README.md`, the Cargo manifests and the two tracked CLI files. `git add -A` would otherwise sweep up any scratch file left in the workspace, and nothing downstream inspects the file list before pushing it. Editing anything under `.github/` is rejected here rather than by a push failure after verification has run, since `GITHUB_TOKEN` cannot push workflow changes.
 - If `claude --help` changed, `docs/claude-cli.md` must have changed beyond its version stamp. On that path the tree was already green before the agent ran, so the cargo gate proves nothing about whether the new options were actually triaged.

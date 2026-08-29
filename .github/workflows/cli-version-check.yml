@@ -155,13 +155,16 @@ jobs:
             } | iconv -c -f utf-8 -t utf-8 >> "$LOG_FILE"
           }
 
-          # Same feature sets as verify-adaptation. With default features only, a
-          # break behind `structured` left tests_failed=false and version-bump then
-          # opened a PR whose body said the suite passed. `cargo fmt` is not run
-          # here: this tree is unmodified develop, so a formatting failure would
-          # say nothing about the CLI upgrade.
+          # The same three feature sets ci.yml requires, matching verify-adaptation.
+          # Any set left out here lets a break in it reach version-bump as
+          # "tests passed": first it was everything but the default set, then the
+          # default set itself. `cargo fmt` is not run here — this tree is
+          # unmodified develop, where a formatting failure would say nothing about
+          # the CLI upgrade.
+          run_section "cargo clippy" cargo clippy -- -D warnings
           run_section "cargo clippy (all features)" cargo clippy --all-features -- -D warnings
           run_section "cargo clippy (no default features)" cargo clippy --no-default-features -- -D warnings
+          run_section "cargo test" cargo test
           run_section "cargo test (all features)" cargo test --all-features
           run_section "cargo test (no default features)" cargo test --no-default-features
           run_section "cargo test (E2E)" cargo test --all-features -- --ignored
@@ -233,7 +236,7 @@ jobs:
           # both interpolated into one prompt, which claude-code-action passes as a
           # single environment variable. Linux rejects an env entry over
           # MAX_ARG_STRLEN (131072 bytes), so the two caps must sum well under it.
-          # 20KB here + 3 x 10KB of log leaves ample headroom.
+          # 20KB here + 7 sections of at most ~8KB each leaves ample headroom.
           DIFF=$(head -c 20000 "$RUNNER_TEMP/help-diff.txt" | iconv -c -f utf-8 -t utf-8)
           DELIM="HELPDIFF_EOF_$(openssl rand -hex 16)"
           {
@@ -288,7 +291,8 @@ jobs:
       # Snapshot the tree the mechanical step produced. Comparing against this,
       # rather than against "are there any changes at all", is what makes the
       # did-the-agent-do-anything check able to fire: the step above always
-      # dirties five files, so any guard phrased as "any changes" is unreachable.
+      # dirties at least four files, so any guard phrased as "any changes" is
+      # unreachable.
       - name: Snapshot the mechanical bump
         id: mechanical
         shell: bash
@@ -528,7 +532,7 @@ jobs:
           # guard unreachable.
           DOCS_OTHER=$(git diff --cached -U0 --no-renames "$BASE_SHA" -- docs/claude-cli.md \
             | grep -E '^[+-]' \
-            | grep -vE '^(\+\+\+ |--- )' \
+            | grep -vxF -e '--- a/docs/claude-cli.md' -e '+++ b/docs/claude-cli.md' -e '--- /dev/null' -e '+++ /dev/null' \
             | grep -vE '^[+-]Classification of all `claude` CLI options as of v[0-9]+\.[0-9]+\.[0-9]+\.' \
             || true)
           if [ "$OPTIONS_CHANGED" = "true" ] && [ -z "$DOCS_OTHER" ]; then
@@ -542,7 +546,7 @@ jobs:
           SRC_OTHER=$(changed_paths -- src/ | grep -v '^src/lib\.rs$' || true)
           LIBRS_OTHER=$(git diff --cached -U0 --no-renames "$BASE_SHA" -- src/lib.rs \
             | grep -E '^[+-]' \
-            | grep -vE '^(\+\+\+ |--- )' \
+            | grep -vxF -e '--- a/src/lib.rs' -e '+++ b/src/lib.rs' -e '--- /dev/null' -e '+++ /dev/null' \
             | grep -vE '^[+-]pub const TESTED_CLI_VERSION: &str = "[0-9]+\.[0-9]+\.[0-9]+";$' \
             || true)
 
@@ -627,6 +631,11 @@ jobs:
       # Deliberately runs with NO secrets in the environment. This is where the
       # agent's build scripts, proc macros and test code first execute, and it
       # covers everything except the tests that genuinely need an API key.
+      #
+      # `ci.yml` never runs on the resulting PR, so this stands in for it. It
+      # covers all three of ci.yml's feature sets — default, none and all — on
+      # stable. It does NOT cover ci.yml's MSRV (1.93) row or `cargo doc`, so an
+      # adaptation using a newer language feature still fails after the merge.
       # `ci.yml` never runs on the resulting PR, so this stands in for it and
       # covers the same feature sets; `structured` is non-default, so plain
       # `cargo test` would not compile the whole crate.
@@ -634,8 +643,10 @@ jobs:
         shell: bash
         run: |
           cargo fmt --check
+          cargo clippy -- -D warnings
           cargo clippy --all-features -- -D warnings
           cargo clippy --no-default-features -- -D warnings
+          cargo test
           cargo test --all-features
           cargo test --no-default-features
 
