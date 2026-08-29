@@ -1,0 +1,43 @@
+name: Update CLI version files
+description: >-
+  Install a Claude CLI version and refresh every file that records it.
+  Shared by the adapt and version-bump jobs so the two paths can never drift.
+
+inputs:
+  version:
+    description: CLI version to install and record
+    required: true
+
+runs:
+  using: composite
+  steps:
+    - name: Install CLI version
+      shell: bash
+      run: npm install -g @anthropic-ai/claude-code@${{ inputs.version }}
+
+    - name: Update tracked version files
+      shell: bash
+      env:
+        NEW_VERSION: ${{ inputs.version }}
+      run: |
+        echo "$NEW_VERSION" > .claude-cli-version
+
+        claude --help | sed 's/\x1b\[[^a-zA-Z]*[a-zA-Z]//g' > .claude-cli-help-output
+        if [ ! -s .claude-cli-help-output ]; then
+          echo "::error::claude --help produced no output"
+          exit 1
+        fi
+
+        # sed exits 0 when a pattern does not match, so verify each substitution.
+        # Otherwise a format change in these files silently skips the update.
+        sed -i "s/TESTED_CLI_VERSION: &str = \".*\"/TESTED_CLI_VERSION: \&str = \"$NEW_VERSION\"/" src/lib.rs
+        if ! grep -q "TESTED_CLI_VERSION: &str = \"$NEW_VERSION\"" src/lib.rs; then
+          echo "::error::Failed to update TESTED_CLI_VERSION in src/lib.rs"
+          exit 1
+        fi
+
+        sed -i "s|<!-- cli-version -->.*<!-- /cli-version -->|<!-- cli-version -->**v$NEW_VERSION**<!-- /cli-version -->|" README.md
+        if ! grep -qF "<!-- cli-version -->**v$NEW_VERSION**<!-- /cli-version -->" README.md; then
+          echo "::error::Failed to update CLI version marker in README.md"
+          exit 1
+        fi

@@ -205,19 +205,31 @@ The following options are injected automatically by the library. Do not pass the
 
 The `cli-version-check.yml` workflow runs on manual dispatch (`workflow_dispatch`) and detects new Claude CLI releases via the npm registry. The scheduled trigger was removed because `claude-code-action` is billed separately from the subscription quota. When a new version is found it:
 
-1. Runs `cargo test` and `cargo clippy` — on failure, `claude-code-action` creates or updates a fix PR
-2. Diffs `claude --help` output against `.claude-cli-help-output` — on changes, `claude-code-action` creates or updates a single option-changes PR (covering both modified options and new options)
-3. Creates or updates a version bump PR updating `.claude-cli-version`, `.claude-cli-help-output`, `TESTED_CLI_VERSION` in `src/lib.rs`, and `README.md`
+1. Runs `cargo test`, `cargo clippy`, and the E2E tests against the new CLI
+2. Diffs `claude --help` output against `.claude-cli-help-output`
+
+The result selects one of two **mutually exclusive** jobs, so a run always produces exactly one PR:
+
+| Outcome | Job | PR contents |
+| --- | --- | --- |
+| Tests failed and/or `--help` changed | `adapt` | Version files plus the code and documentation changes needed to adapt, in a single commit produced by `claude-code-action` |
+| Both clean | `version-bump` | Version files only |
+
+Version files are `.claude-cli-version`, `.claude-cli-help-output`, `TESTED_CLI_VERSION` in `src/lib.rs`, and `README.md`. Both paths write them through the shared composite action `.github/actions/update-cli-version-files`, so the two jobs cannot drift apart.
+
+The property that matters is that the version files are **always committed together with whatever adaptation they require**. If a bump could land on its own, the next run would detect no version change and silently drop any unmerged fixes.
+
+`adapt` receives both the test log and the `--help` diff, because they are usually two symptoms of the same upgrade — a renamed option breaks tests and changes the help output at once. Giving one agent both keeps the evidence together and avoids two PRs editing the same files.
 
 All PRs target `develop`. The workflow uses Max plan authentication (`CLAUDE_CODE_OAUTH_TOKEN`).
 
-To prevent PR/branch proliferation across repeated runs, each job uses a persistent branch (`cli-upgrade/version-bump`, `cli-upgrade/test-fix`, `cli-upgrade/option-changes`) and force-pushes on every run. If an open PR already exists for the branch, its title/body is updated with the latest version info; otherwise a new PR is created.
+To prevent PR/branch proliferation across repeated runs, each job uses a persistent branch (`cli-upgrade/adapt`, `cli-upgrade/version-bump`) and force-pushes on every run. If an open PR already exists for the branch, its title/body is updated with the latest version info; otherwise a new PR is created.
 
 Tracked files in the repository root:
 
 | File | Purpose |
 | --- | --- |
-| `.claude-cli-version` | Last checked CLI version |
+| `.claude-cli-version` | Last CLI version the library has been adapted to. Advances only alongside the changes that version required, never ahead of them |
 | `.claude-cli-help-output` | Last captured `claude --help` output for diffing |
 
 ### Manual checklist
@@ -228,5 +240,5 @@ For maintainers reviewing automated PRs or updating manually:
 2. Compare `--help` output against the option support status tables above
 3. Categorize new options into Supported, Known Unsupported, or Interactive-Only
 4. Run `cargo test` to check for regressions in output parsing
-5. Version files are updated automatically by the version bump PR (`src/lib.rs`, `README.md`, `.claude-cli-version`, `.claude-cli-help-output`)
+5. Version files are updated automatically by whichever PR the workflow produced (`src/lib.rs`, `README.md`, `.claude-cli-version`, `.claude-cli-help-output`)
 6. If the output format (`--output-format json` / `stream-json`) has changed, update types in `src/types.rs` and `src/stream.rs`
