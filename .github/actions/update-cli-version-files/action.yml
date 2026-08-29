@@ -90,8 +90,14 @@ runs:
 
         # The option support tables are only trustworthy for the version whose
         # --help produced them, so the stamp moves with the rest.
-        sed -i "s|as of v[0-9]\+\.[0-9]\+\.[0-9]\+|as of v$VERSION|" docs/claude-cli.md
-        if ! grep -qF "as of v$VERSION" docs/claude-cli.md; then
+        #
+        # Anchored to this one line on purpose. An unanchored `as of vX.Y.Z` would
+        # also rewrite any future sentence containing that phrase, and the docs
+        # triage guard in cli-version-check.yml excludes exactly this line when
+        # deciding whether the agent edited anything — a second rewritten line
+        # would silently make that guard unreachable.
+        sed -i "s|^Classification of all \`claude\` CLI options as of v[0-9]\+\.[0-9]\+\.[0-9]\+\.|Classification of all \`claude\` CLI options as of v$VERSION.|" docs/claude-cli.md
+        if ! grep -qF "Classification of all \`claude\` CLI options as of v$VERSION." docs/claude-cli.md; then
           echo "::error::Failed to update the option table version stamp in docs/claude-cli.md"
           exit 1
         fi

@@ -241,7 +241,7 @@ release-please reads the conventional-commit type to decide whether to cut a rel
 
 Deriving the type from the diff instead does not work in this repository. Unit tests live in `#[cfg(test)]` modules inside `src/`, and doc comments live there too, so a test-only or comment-only edit is indistinguishable by path from a behaviour change — it would ship as `fix:` and publish a release with no functional change.
 
-The diff is still used as a cross-check in the other direction: if `src/` changed beyond the mechanical `TESTED_CLI_VERSION` line but the agent declared `chore`, the job fails. That comparison excludes the constant's definition line exactly rather than by substring, because `src/client.rs` has several real lines that mention the constant.
+The diff is still used as a cross-check in the other direction: if `src/` changed beyond the mechanical `TESTED_CLI_VERSION` line but the agent declared `chore`, the job fails. Files under `src/` other than `lib.rs` are judged by name; `lib.rs` is judged by its own diff with the constant's definition line excluded — matched exactly, not by substring, since several real lines in `src/client.rs` mention the constant and a substring filter would have erased them from any diff it was applied to.
 
 The three report files live in the workspace so that no working-directory restriction can block the agent from writing them, and are deleted before staging so they never reach the patch.
 

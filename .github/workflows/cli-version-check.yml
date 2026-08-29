@@ -18,6 +18,9 @@ env:
   # Paths an adaptation may touch. Defined once so the advisory check in `adapt`
   # and the enforcing check in `publish-adaptation` cannot drift apart.
   ALLOWED_PATHS_RE: '^(src/|docs/|tests/|examples/|README\.md$|Cargo\.toml$|Cargo\.lock$|\.claude-cli-version$|\.claude-cli-help-output$)'
+  # Rejected even inside the allowed prefixes: a .gitignore the agent adds would
+  # hide arbitrary files from the `git add -A` that builds the patch.
+  FORBIDDEN_PATHS_RE: '(^|/)\.gitignore$'
 
 # Every job checks out `develop`, and local actions (`uses: ./…`) resolve from the
 # checked-out workspace rather than from the ref the workflow came from. This
@@ -141,10 +144,10 @@ jobs:
 
             {
               echo "=== $name ==="
-              if [ "$(wc -c < "$section")" -gt 10000 ]; then
-                head -c 5000 "$section"
+              if [ "$(wc -c < "$section")" -gt 8000 ]; then
+                head -c 4000 "$section"
                 printf '\n[... truncated ...]\n'
-                tail -c 5000 "$section"
+                tail -c 4000 "$section"
               else
                 cat "$section"
               fi
@@ -152,9 +155,16 @@ jobs:
             } | iconv -c -f utf-8 -t utf-8 >> "$LOG_FILE"
           }
 
-          run_section "cargo test" cargo test
-          run_section "cargo clippy" cargo clippy -- -D warnings
-          run_section "cargo test (E2E)" cargo test -- --ignored
+          # Same feature sets as verify-adaptation. With default features only, a
+          # break behind `structured` left tests_failed=false and version-bump then
+          # opened a PR whose body said the suite passed. `cargo fmt` is not run
+          # here: this tree is unmodified develop, so a formatting failure would
+          # say nothing about the CLI upgrade.
+          run_section "cargo clippy (all features)" cargo clippy --all-features -- -D warnings
+          run_section "cargo clippy (no default features)" cargo clippy --no-default-features -- -D warnings
+          run_section "cargo test (all features)" cargo test --all-features
+          run_section "cargo test (no default features)" cargo test --no-default-features
+          run_section "cargo test (E2E)" cargo test --all-features -- --ignored
 
           echo "failed=$FAILED" >> "$GITHUB_OUTPUT"
 
@@ -491,6 +501,7 @@ jobs:
           # it calls, so it is a convenience that fails fast — not the boundary.
           # publish-adaptation re-runs it on the trusted side.
           UNEXPECTED=$(changed_paths | grep -vE "$ALLOWED_PATHS_RE" || true)
+          UNEXPECTED="$UNEXPECTED$(changed_paths | grep -E "$FORBIDDEN_PATHS_RE" || true)"
           if [ -n "$UNEXPECTED" ]; then
             echo "::error::The adaptation touches unexpected paths:"
             printf '%s\n' "$UNEXPECTED"
@@ -664,10 +675,9 @@ jobs:
       - name: Re-check the patch paths
         shell: bash
         run: |
-          UNEXPECTED=$(git -c core.quotePath=false apply --numstat "$RUNNER_TEMP/adapt/adapt.patch" \
-            | cut -f3 \
-            | grep -vE "$ALLOWED_PATHS_RE" \
-            || true)
+          PATCH_PATHS=$(git -c core.quotePath=false apply --numstat "$RUNNER_TEMP/adapt/adapt.patch" | cut -f3)
+          UNEXPECTED=$(printf '%s\n' "$PATCH_PATHS" | grep -vE "$ALLOWED_PATHS_RE" || true)
+          UNEXPECTED="$UNEXPECTED$(printf '%s\n' "$PATCH_PATHS" | grep -E "$FORBIDDEN_PATHS_RE" || true)"
           if [ -n "$UNEXPECTED" ]; then
             echo "::error::The verified patch touches unexpected paths:"
             printf '%s\n' "$UNEXPECTED"
@@ -690,6 +700,10 @@ jobs:
           BRANCH="cli-upgrade/adapt"
           SUMMARY=$(cat "$RUNNER_TEMP/adapt/adapt-summary.md")
 
+          # Defence in depth only: these values already passed an identical allowlist
+          # in `adapt` before being written to $GITHUB_OUTPUT, so this check has no
+          # reachable failing input and proves nothing by itself.
+          #
           # The type is declared by the agent and validated against an allowlist in
           # `adapt`. Deriving it from the diff instead cannot work: unit tests and
           # doc comments live inside src/, so a test-only or comment-only edit is
@@ -801,26 +815,6 @@ jobs:
           git checkout -b "$BRANCH"
           git add -A
 
-          # See the matching comment in publish-adaptation: at most one open PR.
-          # This runs before the early exit below, which would otherwise leave a
-          # stale adapt PR open and mergeable.
-          close_sibling() {
-            local pr
-            pr=$(gh pr list --head cli-upgrade/adapt --state open --json number --jq '.[0].number // empty')
-            if [ -n "$pr" ]; then
-              gh pr close "$pr" --delete-branch \
-                --comment "Superseded by the version bump PR for CLI v$NEW_VERSION."
-            fi
-          }
-
-          # develop may already carry this bump if a previous PR was merged while
-          # this run was in flight. Nothing to do, and committing would fail.
-          if git diff --cached --quiet; then
-            echo "develop is already at v$NEW_VERSION; nothing to bump."
-            close_sibling
-            exit 0
-          fi
-
           git commit -m "chore: bump tracked CLI version to $NEW_VERSION (#7)"
           git push --force origin "$BRANCH"
 
@@ -849,4 +843,9 @@ jobs:
             gh pr create --base develop --head "$BRANCH" --title "$PR_TITLE" --body "$PR_BODY"
           fi
 
-          close_sibling
+          # See the matching comment in publish-adaptation: at most one open PR.
+          SIBLING=$(gh pr list --head cli-upgrade/adapt --state open --json number --jq '.[0].number // empty')
+          if [ -n "$SIBLING" ]; then
+            gh pr close "$SIBLING" --delete-branch \
+              --comment "Superseded by the version bump PR for CLI v$NEW_VERSION."
+          fi
