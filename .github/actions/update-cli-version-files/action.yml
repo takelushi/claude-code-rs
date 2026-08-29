@@ -19,6 +19,13 @@ inputs:
       that only need the CLI installed and the help output captured.
     required: false
     default: 'true'
+  install-cli:
+    description: >-
+      Whether to install the CLI and capture its --help output. Set to 'false' by
+      callers that only need the tracked files rewritten — notably a job holding
+      a writable token, which must not run third-party install scripts.
+    required: false
+    default: 'true'
 
 runs:
   using: composite
@@ -36,12 +43,14 @@ runs:
         fi
 
     - name: Install CLI version
+      if: inputs.install-cli == 'true'
       shell: bash
       env:
         VERSION: ${{ inputs.version }}
       run: npm install -g "@anthropic-ai/claude-code@$VERSION"
 
     - name: Capture normalized help output
+      if: inputs.install-cli == 'true'
       shell: bash
       env:
         HELP_PATH: ${{ inputs.help-output-path }}

@@ -14,6 +14,11 @@ concurrency:
 permissions:
   contents: read
 
+env:
+  # Paths an adaptation may touch. Defined once so the advisory check in `adapt`
+  # and the enforcing check in `publish-adaptation` cannot drift apart.
+  ALLOWED_PATHS_RE: '^(src/|docs/|tests/|examples/|README\.md$|Cargo\.toml$|Cargo\.lock$|\.claude-cli-version$|\.claude-cli-help-output$)'
+
 # Every job checks out `develop`, and local actions (`uses: ./…`) resolve from the
 # checked-out workspace rather than from the ref the workflow came from. This
 # workflow therefore only runs once `.github/actions/` exists on `develop`, which
@@ -246,6 +251,7 @@ jobs:
     outputs:
       change_type: ${{ steps.export.outputs.type }}
       breaking: ${{ steps.export.outputs.breaking }}
+      patch_sha256: ${{ steps.export.outputs.patch_sha256 }}
     steps:
       - uses: actions/checkout@v6
         with:
@@ -399,6 +405,7 @@ jobs:
           MECHANICAL_TREE: ${{ steps.mechanical.outputs.tree }}
           BASE_SHA: ${{ steps.base.outputs.sha }}
           OPTIONS_CHANGED: ${{ needs.check-options.outputs.options_changed }}
+          NEW_VERSION: ${{ needs.detect-version.outputs.new_version }}
         run: |
           # The action returns success without running Claude on some paths, so
           # its own conclusion is checked rather than assumed.
@@ -441,17 +448,49 @@ jobs:
           rm -rf .adapt-report
 
           git add -A
+
+          # Written BEFORE the guards below, so a guard failure still leaves the
+          # agent's work in the artifact. Writing it last made `if: always()` on the
+          # upload preserve nothing on exactly the runs worth recovering.
+          #
+          # The range is the base commit, not the index, so this is correct whether
+          # the agent staged its work or committed it.
+          git diff --binary "$BASE_SHA" > "$RUNNER_TEMP/adapt.patch"
+          echo "patch_sha256=$(sha256sum "$RUNNER_TEMP/adapt.patch" | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
+
           if [ "$(git write-tree)" = "$MECHANICAL_TREE" ]; then
             echo "::error::The agent changed nothing beyond the mechanical version bump"
             exit 1
           fi
 
+          # Every guard below diffs against $BASE_SHA for the same reason the patch
+          # does. Against the index alone they would all pass vacuously the moment
+          # the agent ran `git commit`, since the index then equals HEAD.
+          #
+          # `core.quotePath=false` keeps non-ASCII filenames unquoted; otherwise a
+          # legitimate src/ file would arrive as "src/\346\227\245..." and fail the
+          # allowlist on its leading quote.
+          changed_paths() {
+            git -c core.quotePath=false diff --cached --name-only --no-renames "$BASE_SHA" "$@"
+          }
+
+          # The mechanical bump must survive the agent. `write-tree != MECHANICAL_TREE`
+          # only proves the tree differs, not that it still contains the bump — an
+          # agent that reverted .claude-cli-version would otherwise ship a PR whose
+          # body claims the version was recorded, and the next run would redo the
+          # identical adaptation forever.
+          if [ "$(cat .claude-cli-version)" != "$NEW_VERSION" ]; then
+            echo "::error::.claude-cli-version is '$(cat .claude-cli-version)', expected '$NEW_VERSION' — the agent reverted the version bump"
+            exit 1
+          fi
+
           # Only these paths may appear in the patch. `git add -A` otherwise sweeps
-          # up any scratch file left in the workspace, and nothing downstream looks
-          # at the file list before committing and pushing it.
-          UNEXPECTED=$(git diff --cached --name-only --no-renames \
-            | grep -vE '^(src/|docs/|tests/|examples/|README\.md$|Cargo\.toml$|Cargo\.lock$|\.claude-cli-version$|\.claude-cli-help-output$)' \
-            || true)
+          # up any scratch file left in the workspace.
+          #
+          # This check runs in the same job as the agent, which can shim the `git`
+          # it calls, so it is a convenience that fails fast — not the boundary.
+          # publish-adaptation re-runs it on the trusted side.
+          UNEXPECTED=$(changed_paths | grep -vE "$ALLOWED_PATHS_RE" || true)
           if [ -n "$UNEXPECTED" ]; then
             echo "::error::The adaptation touches unexpected paths:"
             printf '%s\n' "$UNEXPECTED"
@@ -465,9 +504,9 @@ jobs:
           # The mechanical step always rewrites this file's "as of vX" stamp, so
           # that line is excluded — comparing the file as a whole would make this
           # guard unreachable.
-          DOCS_OTHER=$(git diff --cached -U0 --no-renames -- docs/claude-cli.md \
+          DOCS_OTHER=$(git diff --cached -U0 --no-renames "$BASE_SHA" -- docs/claude-cli.md \
             | grep -E '^[+-]' \
-            | grep -vE '^(\+\+\+|---)' \
+            | grep -vE '^(\+\+\+ |--- )' \
             | grep -vE '^[+-]Classification of all `claude` CLI options as of v[0-9]+\.[0-9]+\.[0-9]+\.' \
             || true)
           if [ "$OPTIONS_CHANGED" = "true" ] && [ -z "$DOCS_OTHER" ]; then
@@ -475,15 +514,13 @@ jobs:
             exit 1
           fi
 
-          # Cross-check the declaration against the diff. `src/lib.rs` always
-          # carries the mechanical TESTED_CLI_VERSION line, so it is compared with
-          # that exact line excluded — matching on the substring alone would also
-          # erase real code that merely mentions the constant, of which src/client.rs
-          # has several lines.
-          SRC_OTHER=$(git diff --cached --name-only --no-renames -- src/ | grep -v '^src/lib\.rs$' || true)
-          LIBRS_OTHER=$(git diff --cached -U0 --no-renames -- src/lib.rs \
+          # Cross-check the declaration against the diff. `src/lib.rs` always carries
+          # the mechanical TESTED_CLI_VERSION line, so that exact line is excluded
+          # from its own diff; every other file under src/ is judged by name.
+          SRC_OTHER=$(changed_paths -- src/ | grep -v '^src/lib\.rs$' || true)
+          LIBRS_OTHER=$(git diff --cached -U0 --no-renames "$BASE_SHA" -- src/lib.rs \
             | grep -E '^[+-]' \
-            | grep -vE '^(\+\+\+|---)' \
+            | grep -vE '^(\+\+\+ |--- )' \
             | grep -vE '^[+-]pub const TESTED_CLI_VERSION: &str = "[0-9]+\.[0-9]+\.[0-9]+";$' \
             || true)
 
@@ -500,10 +537,6 @@ jobs:
             echo "type=$TYPE"
             echo "breaking=$BREAKING"
           } >> "$GITHUB_OUTPUT"
-
-          # Diff against the base commit, not the index, so the export is still
-          # correct if the agent committed its work instead of leaving it staged.
-          git diff --binary "$BASE_SHA" > "$RUNNER_TEMP/adapt.patch"
 
       # `if: always()` so a failed export still leaves the agent's work and report
       # behind; otherwise a run that burned the full agent budget is unrecoverable.
@@ -552,26 +585,43 @@ jobs:
           name: adapt-result
           path: ${{ runner.temp }}/adapt
 
+      - name: Check the patch digest
+        shell: bash
+        env:
+          EXPECTED: ${{ needs.adapt.outputs.patch_sha256 }}
+        run: |
+          ACTUAL=$(sha256sum "$RUNNER_TEMP/adapt/adapt.patch" | cut -d' ' -f1)
+          if [ "$ACTUAL" != "$EXPECTED" ]; then
+            echo "::error::adapt.patch digest mismatch (expected $EXPECTED, got $ACTUAL)"
+            exit 1
+          fi
+
       - name: Apply the agent's changes
         shell: bash
         run: git apply --index "$RUNNER_TEMP/adapt/adapt.patch"
 
       # Automated PRs do not trigger `ci.yml`, so this is the only gate the
       # adaptation ever passes through.
+      # Deliberately runs with NO secrets in the environment. This is where the
+      # agent's build scripts, proc macros and test code first execute, and it
+      # covers everything except the tests that genuinely need an API key.
+      # `ci.yml` never runs on the resulting PR, so this stands in for it and
+      # covers the same feature sets; `structured` is non-default, so plain
+      # `cargo test` would not compile the whole crate.
       - name: Verify the adaptation
         shell: bash
-        env:
-          CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
         run: |
-          # `ci.yml` never runs on the resulting PR, so this stands in for it and
-          # covers the same feature sets. `structured` is non-default, so plain
-          # `cargo test` would not compile the whole crate.
           cargo fmt --check
           cargo clippy --all-features -- -D warnings
           cargo clippy --no-default-features -- -D warnings
           cargo test --all-features
           cargo test --no-default-features
-          cargo test --all-features -- --ignored
+
+      - name: Verify against the real CLI
+        shell: bash
+        env:
+          CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+        run: cargo test --all-features -- --ignored
 
   publish-adaptation:
     name: Publish adaptation
@@ -594,6 +644,35 @@ jobs:
         with:
           name: adapt-result
           path: ${{ runner.temp }}/adapt
+
+      - name: Check the patch digest
+        shell: bash
+        env:
+          EXPECTED: ${{ needs.adapt.outputs.patch_sha256 }}
+        run: |
+          ACTUAL=$(sha256sum "$RUNNER_TEMP/adapt/adapt.patch" | cut -d' ' -f1)
+          if [ "$ACTUAL" != "$EXPECTED" ]; then
+            echo "::error::adapt.patch digest mismatch (expected $EXPECTED, got $ACTUAL)"
+            exit 1
+          fi
+
+      # The equivalent check in `adapt` runs in the same job as the agent, which
+      # can put a `git` shim on PATH via $GITHUB_PATH and make that check read a
+      # different diff from the one it exported. This job has run neither agent
+      # code nor any third-party installer, so its `git` is the trustworthy one.
+      # This is the boundary; the earlier check is only a fast failure.
+      - name: Re-check the patch paths
+        shell: bash
+        run: |
+          UNEXPECTED=$(git -c core.quotePath=false apply --numstat "$RUNNER_TEMP/adapt/adapt.patch" \
+            | cut -f3 \
+            | grep -vE "$ALLOWED_PATHS_RE" \
+            || true)
+          if [ -n "$UNEXPECTED" ]; then
+            echo "::error::The verified patch touches unexpected paths:"
+            printf '%s\n' "$UNEXPECTED"
+            exit 1
+          fi
 
       - name: Apply the verified changes
         shell: bash
@@ -699,9 +778,15 @@ jobs:
         with:
           ref: ${{ needs.detect-version.outputs.base_sha }}
 
+      # `install-cli: false` keeps npm — and any install script in a freshly
+      # published release — out of the only job here that holds a writable token.
+      # This path runs only when `--help` was byte-identical to the committed
+      # baseline, so `.claude-cli-help-output` needs no update and the CLI itself
+      # is not needed.
       - uses: ./.github/actions/update-cli-version-files
         with:
           version: ${{ needs.detect-version.outputs.new_version }}
+          install-cli: 'false'
 
       - name: Create or update PR
         shell: bash
