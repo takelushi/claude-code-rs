@@ -130,7 +130,7 @@ The library addresses this by using a `ChildGuard` RAII wrapper in `ask_stream` 
 
 ## CLI Option Support Status
 
-Classification of all `claude` CLI options as of v2.1.92. The library operates in `--print` mode only.
+Classification of all `claude` CLI options as of v2.1.105. The library operates in `--print` mode only.
 
 ### Supported
 
@@ -203,21 +203,72 @@ The following options are injected automatically by the library. Do not pass the
 
 ### Automated workflow
 
-The `cli-version-check.yml` workflow runs daily (00:00 UTC) and detects new Claude CLI releases via the npm registry. When a new version is found it:
+The `cli-version-check.yml` workflow runs on manual dispatch (`workflow_dispatch`) and detects new Claude CLI releases via the npm registry. The scheduled trigger was removed because `claude-code-action` is billed separately from the subscription quota. When a new version is found it:
 
-1. Runs `cargo test` and `cargo clippy` — on failure, `claude-code-action` creates or updates a fix PR
-2. Diffs `claude --help` output against `.claude-cli-help-output` — on changes, `claude-code-action` creates or updates a single option-changes PR (covering both modified options and new options)
-3. Creates or updates a version bump PR updating `.claude-cli-version`, `.claude-cli-help-output`, `TESTED_CLI_VERSION` in `src/lib.rs`, and `README.md`
+1. Runs `cargo test`, `cargo clippy`, and the E2E tests against the new CLI
+2. Diffs `claude --help` output against `.claude-cli-help-output`
+
+The result selects one of two **mutually exclusive** paths:
+
+| Outcome | Path | PR contents |
+| --- | --- | --- |
+| Tests failed and/or `--help` changed | `adapt` → `verify-adaptation` → `publish-adaptation` | Version files plus the code and documentation changes needed to adapt, in a single commit |
+| Both clean | `version-bump` | Version files only |
+
+Version files are `.claude-cli-version`, `.claude-cli-help-output`, `TESTED_CLI_VERSION` in `src/lib.rs`, the version in `README.md`, and the option-table stamp in this file. Every job that touches the CLI goes through the shared composite action `.github/actions/update-cli-version-files` — including the `check-options` comparison capture — so the recorded baseline and the value it is compared against cannot be normalized differently.
+
+The property that matters is that the version files are **always committed together with whatever adaptation they require**. If a bump could land on its own, the next run would detect no version change and silently drop any unmerged fixes.
+
+`adapt` receives both the test log and the `--help` diff, because they are usually two symptoms of the same upgrade — a renamed option breaks tests and changes the help output at once. Giving one agent both keeps the evidence together and avoids two PRs editing the same files.
+
+### Why the adaptation is split across three jobs
+
+| Job | Token permissions | What it does |
+| --- | --- | --- |
+| `adapt` | `contents: read` | Runs the agent, exports its changes as a patch |
+| `verify-adaptation` | `contents: read` | Applies the patch and **builds and runs** it |
+| `publish-adaptation` | `contents: write` | Applies the same patch and commits, pushes, opens the PR |
+
+Automated PRs do not trigger `ci.yml` — GitHub does not raise workflow events from `GITHUB_TOKEN` — so `verify-adaptation` is the only gate the adaptation ever passes through. It runs `cargo fmt --check`, clippy, the tests and the E2E tests against the CLI version being adopted.
+
+Compiling and running agent-authored code is the step with the widest blast radius, because a build script or a test can execute anything. It is therefore confined to a job whose token cannot write to the repository. `publish-adaptation` consumes the same artifact but only ever runs `git apply`, which writes files without executing them.
+
+`adapt` passes `github_token: ${{ github.token }}` to `claude-code-action`. This matters: when no token is supplied the action exchanges an OIDC token for a GitHub App token carrying `contents`, `pull_requests` and `issues` write (`src/github/token.ts:69-72`) and installs it as the git remote credential (`src/github/operations/git-config.ts:132`). A job's `permissions:` block constrains `github.token` only, so without an explicit token the job's `contents: read` would not restrict the agent. Supplying one sets `OVERRIDE_GITHUB_TOKEN`, which short-circuits the exchange (`token.ts:160-165`); it also avoids that path's workflow-validation skip, which can return success without having run Claude at all.
+
+### How the commit type is chosen
+
+release-please reads the conventional-commit type to decide whether to cut a release, so it has to be right. The agent declares it, in `.adapt-report/type` — one bare word from `fix`, `feat`, `chore`, `docs`, `test`, `refactor` — alongside `.adapt-report/breaking` (`yes`/`no`) and a free-form `.adapt-report/summary.md`. `adapt` validates both machine fields against an allowlist and fails on anything else, including an empty or missing file; a `breaking` of `yes` appends `!` to the type.
+
+Deriving the type from the diff instead does not work in this repository. Unit tests live in `#[cfg(test)]` modules inside `src/`, and doc comments live there too, so a test-only or comment-only edit is indistinguishable by path from a behaviour change — it would ship as `fix:` and publish a release with no functional change.
+
+The diff is still used as a cross-check in the other direction: if `src/` changed beyond the mechanical `TESTED_CLI_VERSION` line but the agent declared `chore`, the job fails. Files under `src/` other than `lib.rs` are judged by name; `lib.rs` is judged by its own diff with the constant's definition line excluded — matched exactly, not by substring, since several real lines in `src/client.rs` mention the constant and a substring filter would have erased them from any diff it was applied to.
+
+The three report files live in the workspace so that no working-directory restriction can block the agent from writing them, and are deleted before staging so they never reach the patch.
+
+`adapt` exports the patch first, so a failed check still leaves the agent's work in the artifact, and then applies five checks — that the agent changed something beyond the mechanical bump, that it did not revert the bump, and the three below:
+
+- The patch may only touch `src/`, `docs/`, `tests/`, `examples/`, `README.md`, the Cargo manifests and the two tracked CLI files. `git add -A` would otherwise sweep up any scratch file left in the workspace, and nothing downstream inspects the file list before pushing it. Editing anything under `.github/` is rejected here rather than by a push failure after verification has run, since `GITHUB_TOKEN` cannot push workflow changes.
+- If `claude --help` changed, `docs/claude-cli.md` must have changed beyond its version stamp. On that path the tree was already green before the agent ran, so the cargo gate proves nothing about whether the new options were actually triaged.
+
+### Operational notes
 
 All PRs target `develop`. The workflow uses Max plan authentication (`CLAUDE_CODE_OAUTH_TOKEN`).
 
-To prevent PR/branch proliferation under daily runs, each job uses a persistent branch (`cli-upgrade/version-bump`, `cli-upgrade/test-fix`, `cli-upgrade/option-changes`) and force-pushes on every run. If an open PR already exists for the branch, its title/body is updated with the latest version info; otherwise a new PR is created.
+To prevent PR/branch proliferation, each path uses a persistent branch (`cli-upgrade/adapt`, `cli-upgrade/version-bump`) and force-pushes on every run. If an open PR already exists for the branch its title and body are updated; otherwise a new PR is created. Whichever path runs also closes the other path's open PR, so at most one is open at a time — a stale sibling merged later could otherwise roll the tracked version backwards.
+
+**Do not push to these branches.** A force-push on the next run discards any commits added by hand, along with review approvals. Merge or close the PR instead.
+
+A job-level failure — a timeout, an npm outage, a hung E2E test — deliberately produces **no** PR rather than a partially verified one. The signal in that case is the red workflow run.
+
+`version-bump` commits as `chore:`, so a version-only bump does not itself cut a release. The updated `TESTED_CLI_VERSION` therefore reaches crates.io with the next release that some other change triggers, rather than causing one of its own. This is deliberate.
+
+Because local actions (`uses: ./…`) resolve from the checked-out workspace, and every job checks out `develop`, changes to this workflow cannot be exercised until `.github/actions/` exists on `develop`. A dispatch from a feature branch fails when the composite action cannot be found.
 
 Tracked files in the repository root:
 
 | File | Purpose |
 | --- | --- |
-| `.claude-cli-version` | Last checked CLI version |
+| `.claude-cli-version` | Last CLI version the library has been adapted to. Advances only alongside the changes that version required, never ahead of them |
 | `.claude-cli-help-output` | Last captured `claude --help` output for diffing |
 
 ### Manual checklist
@@ -228,5 +279,5 @@ For maintainers reviewing automated PRs or updating manually:
 2. Compare `--help` output against the option support status tables above
 3. Categorize new options into Supported, Known Unsupported, or Interactive-Only
 4. Run `cargo test` to check for regressions in output parsing
-5. Version files are updated automatically by the version bump PR (`src/lib.rs`, `README.md`, `.claude-cli-version`, `.claude-cli-help-output`)
+5. Version files are updated automatically by whichever PR the workflow produced (`src/lib.rs`, `README.md`, `.claude-cli-version`, `.claude-cli-help-output`)
 6. If the output format (`--output-format json` / `stream-json`) has changed, update types in `src/types.rs` and `src/stream.rs`

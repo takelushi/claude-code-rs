@@ -1,0 +1,103 @@
+name: Sync Claude CLI version
+description: >-
+  Install a Claude CLI version, capture its normalized --help output, and
+  optionally refresh every tracked file that records the version. Every job that
+  touches the CLI goes through this action so the capture and the recorded
+  baseline cannot drift apart.
+
+inputs:
+  version:
+    description: CLI version to install and record
+    required: true
+  help-output-path:
+    description: Where to write the normalized `claude --help` capture
+    required: false
+    default: .claude-cli-help-output
+  update-version-files:
+    description: >-
+      Whether to rewrite the tracked version files. Set to 'false' by callers
+      that only need the CLI installed and the help output captured.
+    required: false
+    default: 'true'
+  install-cli:
+    description: >-
+      Whether to install the CLI and capture its --help output. Set to 'false' by
+      callers that only need the tracked files rewritten — notably a job holding
+      a writable token, which must not run third-party install scripts.
+    required: false
+    default: 'true'
+
+runs:
+  using: composite
+  steps:
+    # `required: true` is not enforced for composite action inputs, and this
+    # action is reusable, so it validates rather than trusting its callers.
+    - name: Validate version
+      shell: bash
+      env:
+        VERSION: ${{ inputs.version }}
+      run: |
+        if [[ ! $VERSION =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+          echo "::error::Invalid CLI version: '$VERSION'"
+          exit 1
+        fi
+
+    - name: Install CLI version
+      if: inputs.install-cli == 'true'
+      shell: bash
+      env:
+        VERSION: ${{ inputs.version }}
+      run: npm install -g "@anthropic-ai/claude-code@$VERSION"
+
+    - name: Capture normalized help output
+      if: inputs.install-cli == 'true'
+      shell: bash
+      env:
+        HELP_PATH: ${{ inputs.help-output-path }}
+      run: |
+        # Strip ANSI escape sequences so the capture is stable across runners.
+        claude --help | sed 's/\x1b\[[^a-zA-Z]*[a-zA-Z]//g' > "$HELP_PATH"
+        if [ ! -s "$HELP_PATH" ]; then
+          echo "::error::claude --help produced no output"
+          exit 1
+        fi
+
+    - name: Update tracked version files
+      if: inputs.update-version-files == 'true'
+      shell: bash
+      env:
+        VERSION: ${{ inputs.version }}
+      run: |
+        echo "$VERSION" > .claude-cli-version
+
+        # Every pattern below is anchored and uses a negated character class
+        # rather than `.*`. A greedy `.*` would swallow the rest of the line
+        # (a trailing `;`, a comment, a second marker pair) while still leaving
+        # the needle the verification greps for — so the guard would pass on a
+        # corrupted file. `sed` also exits 0 when nothing matched, hence the
+        # `grep -qF` after each substitution.
+        sed -i "s/^pub const TESTED_CLI_VERSION: &str = \"[^\"]*\";\$/pub const TESTED_CLI_VERSION: \&str = \"$VERSION\";/" src/lib.rs
+        if ! grep -qF "pub const TESTED_CLI_VERSION: &str = \"$VERSION\";" src/lib.rs; then
+          echo "::error::Failed to update TESTED_CLI_VERSION in src/lib.rs"
+          exit 1
+        fi
+
+        sed -i "s|<!-- cli-version -->[^<]*<!-- /cli-version -->|<!-- cli-version -->**v$VERSION**<!-- /cli-version -->|g" README.md
+        if ! grep -qF "<!-- cli-version -->**v$VERSION**<!-- /cli-version -->" README.md; then
+          echo "::error::Failed to update CLI version marker in README.md"
+          exit 1
+        fi
+
+        # The option support tables are only trustworthy for the version whose
+        # --help produced them, so the stamp moves with the rest.
+        #
+        # Anchored to this one line on purpose. An unanchored `as of vX.Y.Z` would
+        # also rewrite any future sentence containing that phrase, and the docs
+        # triage guard in cli-version-check.yml excludes exactly this line when
+        # deciding whether the agent edited anything — a second rewritten line
+        # would silently make that guard unreachable.
+        sed -i "s|^Classification of all \`claude\` CLI options as of v[0-9]\+\.[0-9]\+\.[0-9]\+\.|Classification of all \`claude\` CLI options as of v$VERSION.|" docs/claude-cli.md
+        if ! grep -qF "Classification of all \`claude\` CLI options as of v$VERSION." docs/claude-cli.md; then
+          echo "::error::Failed to update the option table version stamp in docs/claude-cli.md"
+          exit 1
+        fi
