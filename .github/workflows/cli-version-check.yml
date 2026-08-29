@@ -27,10 +27,19 @@ jobs:
       version_changed: ${{ steps.compare.outputs.changed }}
       new_version: ${{ steps.compare.outputs.new_version }}
       old_version: ${{ steps.compare.outputs.old_version }}
+      base_sha: ${{ steps.base.outputs.sha }}
     steps:
       - uses: actions/checkout@v6
         with:
           ref: develop
+
+      # Every later job checks out this exact commit. The adaptation is passed
+      # between jobs as a patch, and `develop` can move while the agent runs, so
+      # resolving the ref once is what keeps the patch applicable.
+      - name: Resolve develop
+        id: base
+        shell: bash
+        run: echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
 
       - name: Get latest CLI version from npm
         id: npm
@@ -86,7 +95,7 @@ jobs:
     steps:
       - uses: actions/checkout@v6
         with:
-          ref: develop
+          ref: ${{ needs.detect-version.outputs.base_sha }}
 
       - uses: dtolnay/rust-toolchain@stable
         with:
@@ -102,8 +111,8 @@ jobs:
 
       - name: Run tests, clippy, and E2E tests
         id: test-result
-        # `shell: bash` runs with `-o pipefail`, which the default `bash -e` lacks.
-        # Without it `cmd | tee` reports tee's exit status and failures go unnoticed.
+        # Failure propagation comes from `if ! cmd > file` below, not from the
+        # shell. `shell: bash` is set for consistency with every other step here.
         shell: bash
         env:
           CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
@@ -168,7 +177,7 @@ jobs:
     steps:
       - uses: actions/checkout@v6
         with:
-          ref: develop
+          ref: ${{ needs.detect-version.outputs.base_sha }}
 
       # Captured through the same action that writes the committed baseline, so
       # the comparison and the baseline can never be normalised differently.
@@ -225,16 +234,18 @@ jobs:
       needs.check-options.outputs.options_changed == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 30
-    # The agent gets NO write access. It edits the working tree; publish-adapt
-    # verifies the result and is the only job that can commit or push.
     permissions:
       contents: read
       pull-requests: read
-      id-token: write
     steps:
       - uses: actions/checkout@v6
         with:
-          ref: develop
+          ref: ${{ needs.detect-version.outputs.base_sha }}
+
+      - name: Record the base commit
+        id: base
+        shell: bash
+        run: echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
 
       - uses: dtolnay/rust-toolchain@stable
         with:
@@ -249,8 +260,30 @@ jobs:
         with:
           version: ${{ needs.detect-version.outputs.new_version }}
 
+      # Snapshot the tree the mechanical step produced. Comparing against this,
+      # rather than against "are there any changes at all", is what makes the
+      # did-the-agent-do-anything check able to fire: the step above always
+      # dirties five files, so any guard phrased as "any changes" is unreachable.
+      - name: Snapshot the mechanical bump
+        id: mechanical
+        shell: bash
+        run: |
+          git add -A
+          echo "tree=$(git write-tree)" >> "$GITHUB_OUTPUT"
+
       - uses: anthropics/claude-code-action@v1
+        id: claude
         with:
+          # Supplying a token sets OVERRIDE_GITHUB_TOKEN, which makes
+          # setupGitHubToken() (src/github/token.ts:160-165) return it directly
+          # instead of exchanging an OIDC token for a GitHub App token. Without
+          # this the action mints its own App token with contents/pull_requests/
+          # issues: write (token.ts:69-72) and installs it as the git remote
+          # credential (git-config.ts:132) — the job's `permissions:` block only
+          # ever constrains `github.token`, so it would not bind the agent at all.
+          # It also removes the OIDC exchange's workflow-validation skip path,
+          # which can otherwise return success without running Claude.
+          github_token: ${{ github.token }}
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           prompt: |
             Claude CLI has been upgraded from ${{ needs.detect-version.outputs.old_version }} to ${{ needs.detect-version.outputs.new_version }}, and this library needs to be adapted to it.
@@ -316,20 +349,35 @@ jobs:
             publishing job will refuse to open a PR, which is the correct outcome.
           claude_args: "--allowedTools Bash,Read,Edit,Write,Glob,Grep"
 
-      - name: Export working tree changes
-        id: export
+      - name: Export the adaptation
         shell: bash
+        env:
+          CLAUDE_CONCLUSION: ${{ steps.claude.outputs.conclusion }}
+          MECHANICAL_TREE: ${{ steps.mechanical.outputs.tree }}
+          BASE_SHA: ${{ steps.base.outputs.sha }}
         run: |
-          git add -A
-          if git diff --cached --quiet; then
-            echo "::error::The agent produced no changes at all"
+          # The action returns success without running Claude on some paths, so
+          # its own conclusion is checked rather than assumed.
+          if [ "$CLAUDE_CONCLUSION" != "success" ]; then
+            echo "::error::claude-code-action did not run to completion (conclusion='$CLAUDE_CONCLUSION')"
             exit 1
           fi
-          git diff --cached --binary > "$RUNNER_TEMP/adapt.patch"
 
-          if [ ! -f "$RUNNER_TEMP/adapt-summary.md" ]; then
-            printf 'breaking: no\nThe agent did not write a summary.\n' \
-              > "$RUNNER_TEMP/adapt-summary.md"
+          git add -A
+          if [ "$(git write-tree)" = "$MECHANICAL_TREE" ]; then
+            echo "::error::The agent changed nothing beyond the mechanical version bump"
+            exit 1
+          fi
+
+          # Diff against the base commit, not the index, so the export is still
+          # correct if the agent committed its work instead of leaving it staged.
+          git diff --binary "$BASE_SHA" > "$RUNNER_TEMP/adapt.patch"
+
+          # A missing report means the agent did not finish its contract. It must
+          # not be silently replaced with a permissive default.
+          if [ ! -s "$RUNNER_TEMP/adapt-summary.md" ]; then
+            echo "::error::The agent did not write $RUNNER_TEMP/adapt-summary.md"
+            exit 1
           fi
 
       - uses: actions/upload-artifact@v4
@@ -340,18 +388,21 @@ jobs:
             ${{ runner.temp }}/adapt-summary.md
           retention-days: 7
 
-  publish-adapt:
-    name: Verify and publish adaptation
+  verify-adaptation:
+    name: Verify adaptation
     needs: [detect-version, adapt]
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    # Compiling and running the agent's code is the dangerous part, so it happens
+    # here, where the job token cannot write to the repository. The publishing job
+    # runs no agent-authored code at all.
     permissions:
-      contents: write
-      pull-requests: write
+      contents: read
     steps:
       - uses: actions/checkout@v6
         with:
-          ref: develop
+          ref: ${{ needs.detect-version.outputs.base_sha }}
+          persist-credentials: false
 
       - uses: dtolnay/rust-toolchain@stable
         with:
@@ -376,9 +427,8 @@ jobs:
         shell: bash
         run: git apply --index "$RUNNER_TEMP/adapt/adapt.patch"
 
-      # The whole point of this job: the adaptation is proven before anything is
-      # published, rather than resting on the agent's own report. Automated PRs
-      # do not trigger `ci.yml`, so this is the only gate that exists.
+      # Automated PRs do not trigger `ci.yml`, so this is the only gate the
+      # adaptation ever passes through.
       - name: Verify the adaptation
         shell: bash
         env:
@@ -388,6 +438,31 @@ jobs:
           cargo clippy --all-features -- -D warnings
           cargo test --all-features
           cargo test --all-features -- --ignored
+
+  publish-adaptation:
+    name: Publish adaptation
+    needs: [detect-version, verify-adaptation]
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ needs.detect-version.outputs.base_sha }}
+
+      # The same artifact verify-adaptation consumed, so what is published is
+      # exactly what was verified. Note that no step in this job builds or runs
+      # any of it — `git apply` only writes files.
+      - uses: actions/download-artifact@v4
+        with:
+          name: adapt-result
+          path: ${{ runner.temp }}/adapt
+
+      - name: Apply the verified changes
+        shell: bash
+        run: git apply --index "$RUNNER_TEMP/adapt/adapt.patch"
 
       - name: Create or update PR
         shell: bash
@@ -492,7 +567,7 @@ jobs:
     steps:
       - uses: actions/checkout@v6
         with:
-          ref: develop
+          ref: ${{ needs.detect-version.outputs.base_sha }}
 
       - uses: ./.github/actions/update-cli-version-files
         with:
