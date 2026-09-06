@@ -130,7 +130,7 @@ The library addresses this by using a `ChildGuard` RAII wrapper in `ask_stream` 
 
 ## CLI Option Support Status
 
-Classification of all `claude` CLI options as of v2.1.92. The library operates in `--print` mode only.
+Classification of all `claude` CLI options as of v2.1.263. The library operates in `--print` mode only.
 
 ### Supported
 
@@ -165,6 +165,12 @@ These options have dedicated `ClaudeConfigBuilder` methods:
 | `--disable-slash-commands` | `disable_slash_commands()` |
 | `--strict-mcp-config` | `strict_mcp_config()` |
 
+CLI v2.1.263 notes on existing supported options:
+
+- `--effort` gained a new `xhigh` value (`effort::XHIGH`).
+- `--permission-mode` renamed its `default` choice to `manual`; the corresponding constant was renamed from `permission_mode::DEFAULT` to `permission_mode::MANUAL` (value `"manual"`). This is a breaking change for callers using the constant directly.
+- `--fallback-model` now accepts a comma-separated list of models to try in order, and retries the primary model at the start of each user turn.
+
 ### Known Unsupported
 
 Relevant to `--print` mode but not yet implemented as builder methods. All of these can be passed via `extra_args()`.
@@ -182,12 +188,19 @@ Relevant to `--print` mode but not yet implemented as builder methods. All of th
 | `--verbose` | Explicit verbose mode (auto-added for stream-json) |
 | `--debug` | Enable debug mode with optional category filtering |
 | `--debug-file` | Write debug logs to a specific file path |
+| `--autocompact` | Auto-compact window size (`auto`, or 100k-1M tokens) |
+| `--forward-subagent-text` | Forward subagent text/thinking blocks as assistant/user messages (only works with `--print` and `--output-format=stream-json`) |
+| `--permission-prompts` | Who answers permission prompts with `--print`: `host` or `none` |
+| `--prompt-suggestions` | Emit a `prompt_suggestion` message after each turn (print/SDK mode) |
+| `--restricted` | Restricted mode: removes command/code-running tools and confines file tools to working directories |
+| `--safe-mode` | Start with all customizations (CLAUDE.md, skills, plugins, hooks, MCP servers, etc.) disabled |
+| `--system-prompt-snapshot` | Record the system prompt once per conversation and reuse it verbatim (`on`/`off`) |
 
 ### Interactive-Only (Not Applicable)
 
 These options are for interactive CLI sessions and do not apply to `--print` mode:
 
-`--chrome`, `--no-chrome`, `--ide`, `--tmux`, `--worktree`, `--from-pr`, `--remote-control-session-name-prefix`, `--replay-user-messages`, `--plugin-dir`
+`--chrome`, `--no-chrome`, `--ide`, `--tmux`, `--worktree`, `--from-pr`, `--remote-control-session-name-prefix`, `--replay-user-messages`, `--plugin-dir`, `--plugin-url`, `--ax-screen-reader`, `--bg`/`--background`, `--cloud`, `--environment`, `--remote-control`, `--teleport`
 
 ### Managed Internally
 

@@ -82,7 +82,10 @@ pub struct ClaudeConfig {
     /// the stream yields [`ClaudeError::Timeout`](crate::ClaudeError::Timeout)
     /// and terminates. Library-only; not a CLI flag.
     pub stream_idle_timeout: Option<Duration>,
-    /// Fallback model when default is overloaded (`--fallback-model`).
+    /// Fallback model(s) to use when the default model is overloaded or
+    /// unavailable (`--fallback-model`). Accepts a comma-separated list to
+    /// try each in order; the primary model is retried at the start of each
+    /// user turn.
     pub fallback_model: Option<String>,
     /// Effort level (`--effort`). Use [`effort`] constants for known values.
     pub effort: Option<String>,
@@ -552,7 +555,8 @@ impl ClaudeConfigBuilder {
         self
     }
 
-    /// Sets the fallback model.
+    /// Sets the fallback model(s). Accepts a comma-separated list to try
+    /// each in order when the default model is overloaded or unavailable.
     #[must_use]
     pub fn fallback_model(mut self, model: impl Into<String>) -> Self {
         self.fallback_model = Some(model.into());
@@ -808,14 +812,16 @@ pub mod effort {
     pub const MEDIUM: &str = "medium";
     /// High effort.
     pub const HIGH: &str = "high";
+    /// Extra-high effort.
+    pub const XHIGH: &str = "xhigh";
     /// Maximum effort.
     pub const MAX: &str = "max";
 }
 
 /// Known values for the `--permission-mode` CLI option.
 pub mod permission_mode {
-    /// Default permission mode.
-    pub const DEFAULT: &str = "default";
+    /// Manual permission mode (renamed from `default` in CLI v2.1.263).
+    pub const MANUAL: &str = "manual";
     /// Accept edits without confirmation.
     pub const ACCEPT_EDITS: &str = "acceptEdits";
     /// Automatic permission handling.
