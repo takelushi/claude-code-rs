@@ -130,7 +130,13 @@ The library addresses this by using a `ChildGuard` RAII wrapper in `ask_stream` 
 
 ## CLI Option Support Status
 
-Classification of all `claude` CLI options as of v2.1.92. The library operates in `--print` mode only.
+Classification of all `claude` CLI options as of v2.1.269. The library operates in `--print` mode only.
+
+### Value Changes in v2.1.269
+
+- `--permission-mode`: the `default` choice was renamed to `manual`. `permission_mode::DEFAULT` was renamed to `permission_mode::MANUAL` (value `"manual"`).
+- `--effort`: a new `xhigh` choice was added, between `high` and `max`. Added as `effort::XHIGH`.
+- `--mcp-debug` (deprecated alias for `--debug`) was removed from the CLI.
 
 ### Supported
 
@@ -182,12 +188,19 @@ Relevant to `--print` mode but not yet implemented as builder methods. All of th
 | `--verbose` | Explicit verbose mode (auto-added for stream-json) |
 | `--debug` | Enable debug mode with optional category filtering |
 | `--debug-file` | Write debug logs to a specific file path |
+| `--autocompact` | Auto-compact window size (`auto`, or 100k-1M tokens) |
+| `--forward-subagent-text` | Forward subagent text/thinking blocks as messages (`--print` + `stream-json` only) |
+| `--permission-prompts` | Who answers permission prompts with `--print` (`host` or `none`) |
+| `--prompt-suggestions` | Emit a predicted next-user-prompt message after each turn |
+| `--restricted` | Restricted mode: removes command/code-running tools and confines file access |
+| `--safe-mode` | Start with all customizations (CLAUDE.md, skills, plugins, hooks, MCP, etc.) disabled |
+| `--system-prompt-snapshot` | Control whether the system prompt is recorded once and reused verbatim (`on`/`off`) |
 
 ### Interactive-Only (Not Applicable)
 
 These options are for interactive CLI sessions and do not apply to `--print` mode:
 
-`--chrome`, `--no-chrome`, `--ide`, `--tmux`, `--worktree`, `--from-pr`, `--remote-control-session-name-prefix`, `--replay-user-messages`, `--plugin-dir`
+`--chrome`, `--no-chrome`, `--ide`, `--tmux`, `--worktree`, `--from-pr`, `--remote-control-session-name-prefix`, `--replay-user-messages`, `--plugin-dir`, `--plugin-url`, `--ax-screen-reader`, `--bg`/`--background`, `--cloud`, `--environment`, `--remote-control`, `--teleport`
 
 ### Managed Internally
 
