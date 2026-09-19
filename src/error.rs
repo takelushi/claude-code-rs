@@ -75,7 +75,7 @@ mod tests {
 
     #[test]
     fn from_io_error() {
-        let io_err = io::Error::new(io::ErrorKind::Other, "disk full");
+        let io_err = io::Error::other("disk full");
         let err = ClaudeError::from(io_err);
         assert!(matches!(err, ClaudeError::Io(_)));
         assert_eq!(err.to_string(), "disk full");

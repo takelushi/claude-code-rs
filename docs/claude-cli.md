@@ -130,7 +130,9 @@ The library addresses this by using a `ChildGuard` RAII wrapper in `ask_stream` 
 
 ## CLI Option Support Status
 
-Classification of all `claude` CLI options as of v2.1.92. The library operates in `--print` mode only.
+Classification of all `claude` CLI options as of v2.1.278. The library operates in `--print` mode only.
+
+> **v2.1.278 note:** The `--permission-mode` value previously named `default` was renamed to `manual`. The corresponding constant is `permission_mode::MANUAL`. `--effort` gained a new `xhigh` value (`effort::XHIGH`). `--fallback-model` now accepts a comma-separated list of models to try in order.
 
 ### Supported
 
@@ -182,12 +184,19 @@ Relevant to `--print` mode but not yet implemented as builder methods. All of th
 | `--verbose` | Explicit verbose mode (auto-added for stream-json) |
 | `--debug` | Enable debug mode with optional category filtering |
 | `--debug-file` | Write debug logs to a specific file path |
+| `--autocompact` | Auto-compact window size (`auto`, or 100k-1M tokens) |
+| `--forward-subagent-text` | Forward subagent text/thinking blocks as messages (print + stream-json only) |
+| `--permission-prompts` | Who answers permission prompts with `--print` (`host` or `none`) |
+| `--prompt-suggestions` | Emit a predicted next-prompt message after each turn (print/SDK mode) |
+| `--restricted` | Restricted mode: removes command/code-running tools and confines file tools to working directories |
+| `--safe-mode` | Disable all customizations (CLAUDE.md, skills, plugins, hooks, MCP servers, etc.) for troubleshooting |
+| `--system-prompt-snapshot` | Record the system prompt once per conversation and reuse it verbatim (`on`/`off`) |
 
 ### Interactive-Only (Not Applicable)
 
 These options are for interactive CLI sessions and do not apply to `--print` mode:
 
-`--chrome`, `--no-chrome`, `--ide`, `--tmux`, `--worktree`, `--from-pr`, `--remote-control-session-name-prefix`, `--replay-user-messages`, `--plugin-dir`
+`--chrome`, `--no-chrome`, `--ide`, `--tmux`, `--worktree`, `--from-pr`, `--remote-control-session-name-prefix`, `--replay-user-messages`, `--plugin-dir`, `--plugin-url`, `--ax-screen-reader`, `--bg`/`--background`, `--cloud`, `--environment`, `--remote-control`, `--teleport`
 
 ### Managed Internally
 

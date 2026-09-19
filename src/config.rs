@@ -552,7 +552,8 @@ impl ClaudeConfigBuilder {
         self
     }
 
-    /// Sets the fallback model.
+    /// Sets the fallback model(s). Accepts a comma-separated list to try each in order
+    /// when the default model is overloaded or unavailable.
     #[must_use]
     pub fn fallback_model(mut self, model: impl Into<String>) -> Self {
         self.fallback_model = Some(model.into());
@@ -808,14 +809,16 @@ pub mod effort {
     pub const MEDIUM: &str = "medium";
     /// High effort.
     pub const HIGH: &str = "high";
+    /// Extra-high effort.
+    pub const XHIGH: &str = "xhigh";
     /// Maximum effort.
     pub const MAX: &str = "max";
 }
 
 /// Known values for the `--permission-mode` CLI option.
 pub mod permission_mode {
-    /// Default permission mode.
-    pub const DEFAULT: &str = "default";
+    /// Manual permission mode (prompts for each action). Named `default` in CLI versions before 2.1.278.
+    pub const MANUAL: &str = "manual";
     /// Accept edits without confirmation.
     pub const ACCEPT_EDITS: &str = "acceptEdits";
     /// Automatic permission handling.
