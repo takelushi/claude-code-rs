@@ -130,7 +130,7 @@ The library addresses this by using a `ChildGuard` RAII wrapper in `ask_stream` 
 
 ## CLI Option Support Status
 
-Classification of all `claude` CLI options as of v2.1.92. The library operates in `--print` mode only.
+Classification of all `claude` CLI options as of v2.1.283. The library operates in `--print` mode only.
 
 ### Supported
 
@@ -165,6 +165,12 @@ These options have dedicated `ClaudeConfigBuilder` methods:
 | `--disable-slash-commands` | `disable_slash_commands()` |
 | `--strict-mcp-config` | `strict_mcp_config()` |
 
+As of v2.1.283:
+
+- `--effort` gained a new `xhigh` choice, tracked as `effort::XHIGH`.
+- `--permission-mode` renamed its `default` choice to `manual`; the library's constant was renamed from `permission_mode::DEFAULT` to `permission_mode::MANUAL` (value `"manual"`) to match.
+- `--fallback-model` now accepts a comma-separated list of models to try in order (retrying the primary at the start of each user turn). `fallback_model()` still takes a plain string, so callers can pass a comma-separated list directly; no builder change was needed.
+
 ### Known Unsupported
 
 Relevant to `--print` mode but not yet implemented as builder methods. All of these can be passed via `extra_args()`.
@@ -172,7 +178,7 @@ Relevant to `--print` mode but not yet implemented as builder methods. All of th
 | CLI Option | Description |
 | --- | --- |
 | `--agent` | Agent for the current session |
-| `--agents` | JSON object defining custom agents |
+| `--agents` | JSON object defining custom agents, or (with `--print`) a path to a file holding one |
 | `--betas` | Beta headers for API requests |
 | `--continue` | Continue most recent conversation |
 | `--fork-session` | Create new session ID when resuming |
@@ -182,12 +188,22 @@ Relevant to `--print` mode but not yet implemented as builder methods. All of th
 | `--verbose` | Explicit verbose mode (auto-added for stream-json) |
 | `--debug` | Enable debug mode with optional category filtering |
 | `--debug-file` | Write debug logs to a specific file path |
+| `--plugin-dir` | Load a plugin from a directory or `.zip` for this session only; repeatable, a folder of plugins loads each child |
+| `--plugin-url` | Fetch a plugin `.zip` from a URL for this session only; repeatable |
+| `--autocompact` | Auto-compact window size (`auto`, or 100k-1M tokens) |
+| `--client-data-url` | URL for a signed configuration document; the CLI exits if it cannot be loaded or doesn't cover the selected model |
+| `--forward-subagent-text` | Forward subagent text/thinking blocks as assistant/user messages (only works with `--print` and `--output-format=stream-json`) |
+| `--permission-prompts` | Who answers permission prompts with `--print`: `host` or `none` |
+| `--prompt-suggestions` | In print/SDK mode, emits a `prompt_suggestion` message after each turn with a predicted next user prompt |
+| `--restricted` | Restricted mode: removes command/code-running tools and `WebFetch` unless named via `--tools`, ignores user/project/local settings |
+| `--safe-mode` | Start with CLAUDE.md, skills, plugins, hooks, MCP servers, custom commands/agents, etc. disabled (admin-managed settings still apply) |
+| `--system-prompt-snapshot` | `on`/`off`: record the system prompt once per conversation and reuse it verbatim on every request and resume |
 
 ### Interactive-Only (Not Applicable)
 
 These options are for interactive CLI sessions and do not apply to `--print` mode:
 
-`--chrome`, `--no-chrome`, `--ide`, `--tmux`, `--worktree`, `--from-pr`, `--remote-control-session-name-prefix`, `--replay-user-messages`, `--plugin-dir`
+`--chrome`, `--no-chrome`, `--ide`, `--tmux`, `--worktree`, `--from-pr`, `--remote-control-session-name-prefix`, `--replay-user-messages`, `--ax-screen-reader`, `--bg`/`--background`, `--cloud`, `--environment`, `--teleport`
 
 ### Managed Internally
 
