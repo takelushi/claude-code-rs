@@ -130,7 +130,7 @@ The library addresses this by using a `ChildGuard` RAII wrapper in `ask_stream` 
 
 ## CLI Option Support Status
 
-Classification of all `claude` CLI options as of v2.1.92. The library operates in `--print` mode only.
+Classification of all `claude` CLI options as of v2.1.319. The library operates in `--print` mode only.
 
 ### Supported
 
@@ -182,12 +182,29 @@ Relevant to `--print` mode but not yet implemented as builder methods. All of th
 | `--verbose` | Explicit verbose mode (auto-added for stream-json) |
 | `--debug` | Enable debug mode with optional category filtering |
 | `--debug-file` | Write debug logs to a specific file path |
+| `--autocompact` | Auto-compact window size (`auto` or 100k–1M tokens) |
+| `--forward-subagent-text` | Forward subagent text/thinking blocks with `parent_tool_use_id` (stream-json) |
+| `--permission-prompts` | Who answers permission prompts (`host` or `none`) |
+| `--prompt-suggestions` | Emit predicted next-prompt suggestions after each turn |
+| `--restricted` | Restricted mode: removes code-running tools, ignores user/project/local settings |
+| `--safe-mode` | Start with all customizations disabled |
+| `--system-prompt-snapshot` | Record/reuse the system prompt per conversation (`on` / `off`) |
+| `--plugin-url` | Fetch a plugin .zip from a URL for this session |
 
 ### Interactive-Only (Not Applicable)
 
 These options are for interactive CLI sessions and do not apply to `--print` mode:
 
-`--chrome`, `--no-chrome`, `--ide`, `--tmux`, `--worktree`, `--from-pr`, `--remote-control-session-name-prefix`, `--replay-user-messages`, `--plugin-dir`
+`--chrome`, `--no-chrome`, `--ide`, `--tmux`, `--worktree`, `--from-pr`, `--remote-control-session-name-prefix`, `--replay-user-messages`, `--plugin-dir`, `--bg` / `--background`, `--cloud`, `--desktop`, `--environment`, `--teleport`, `--remote-control`, `--ax-screen-reader`
+
+### Changes in v2.1.319
+
+- `--effort` now also accepts `xhigh` (`effort::XHIGH` added).
+- `--permission-mode` choices: `default` removed from `--help`, `manual` added (`permission_mode::MANUAL` added; `DEFAULT` retained for compatibility since values are plain strings).
+- `--agents` also accepts a file path with `--print`.
+- `--fallback-model` accepts a comma-separated list.
+- `--mcp-debug` (deprecated) no longer listed.
+- New subcommands (`attach`, `logs`, `stop`, `rm`, `respawn`, `purge`, `import`, `gateway`, `ultrareview`) are not applicable to `--print` mode.
 
 ### Managed Internally
 
