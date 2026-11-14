@@ -130,7 +130,7 @@ The library addresses this by using a `ChildGuard` RAII wrapper in `ask_stream` 
 
 ## CLI Option Support Status
 
-Classification of all `claude` CLI options as of v2.1.92. The library operates in `--print` mode only.
+Classification of all `claude` CLI options as of v2.1.325. The library operates in `--print` mode only.
 
 ### Supported
 
@@ -172,7 +172,7 @@ Relevant to `--print` mode but not yet implemented as builder methods. All of th
 | CLI Option | Description |
 | --- | --- |
 | `--agent` | Agent for the current session |
-| `--agents` | JSON object defining custom agents |
+| `--agents` | JSON object defining custom agents (or, with `--print`, a path to a file holding one) |
 | `--betas` | Beta headers for API requests |
 | `--continue` | Continue most recent conversation |
 | `--fork-session` | Create new session ID when resuming |
@@ -182,12 +182,24 @@ Relevant to `--print` mode but not yet implemented as builder methods. All of th
 | `--verbose` | Explicit verbose mode (auto-added for stream-json) |
 | `--debug` | Enable debug mode with optional category filtering |
 | `--debug-file` | Write debug logs to a specific file path |
+| `--autocompact` | Auto-compact window size (`auto`, or 100k–1M tokens) |
+| `--background` / `--bg` | Start the session in the background |
+| `--forward-subagent-text` | Forward subagent text/thinking blocks in stream-json output |
+| `--permission-prompts` | Who answers permission prompts with `--print` (`host` or `none`) |
+| `--prompt-suggestions` | Emit predicted next-prompt suggestions after each turn |
+| `--restricted` | Restricted mode (removes code-running tools, ignores user/project/local settings) |
+| `--safe-mode` | Start with all customizations disabled |
+| `--system-prompt-snapshot` | Record/reuse the system prompt per conversation (`on` / `off`) |
 
 ### Interactive-Only (Not Applicable)
 
 These options are for interactive CLI sessions and do not apply to `--print` mode:
 
-`--chrome`, `--no-chrome`, `--ide`, `--tmux`, `--worktree`, `--from-pr`, `--remote-control-session-name-prefix`, `--replay-user-messages`, `--plugin-dir`
+`--chrome`, `--no-chrome`, `--ide`, `--tmux`, `--worktree`, `--from-pr`, `--remote-control-session-name-prefix`, `--replay-user-messages`, `--plugin-dir`, `--plugin-url`, `--ax-screen-reader`, `--cloud`, `--desktop`, `--environment`, `--remote-control`, `--teleport`
+
+Removed from `--help` as of v2.1.325: `--mcp-debug` (deprecated in favor of `--debug`).
+
+Value changes as of v2.1.325: `--effort` gains `xhigh`; `--permission-mode` replaces `default` with `manual` (the `permission_mode::DEFAULT` constant is retained, `permission_mode::MANUAL` and `effort::XHIGH` were added); `--fallback-model` accepts a comma-separated list.
 
 ### Managed Internally
 
