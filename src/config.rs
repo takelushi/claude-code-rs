@@ -808,6 +808,8 @@ pub mod effort {
     pub const MEDIUM: &str = "medium";
     /// High effort.
     pub const HIGH: &str = "high";
+    /// Extra-high effort.
+    pub const XHIGH: &str = "xhigh";
     /// Maximum effort.
     pub const MAX: &str = "max";
 }
@@ -815,7 +817,11 @@ pub mod effort {
 /// Known values for the `--permission-mode` CLI option.
 pub mod permission_mode {
     /// Default permission mode.
+    ///
+    /// Newer CLI versions list `manual` instead of `default` in `--help`; see [`MANUAL`].
     pub const DEFAULT: &str = "default";
+    /// Manual permission mode (listed in place of `default` since CLI v2.1.330).
+    pub const MANUAL: &str = "manual";
     /// Accept edits without confirmation.
     pub const ACCEPT_EDITS: &str = "acceptEdits";
     /// Automatic permission handling.
