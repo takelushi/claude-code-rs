@@ -130,7 +130,7 @@ The library addresses this by using a `ChildGuard` RAII wrapper in `ask_stream` 
 
 ## CLI Option Support Status
 
-Classification of all `claude` CLI options as of v2.1.92. The library operates in `--print` mode only.
+Classification of all `claude` CLI options as of v2.1.332. The library operates in `--print` mode only.
 
 ### Supported
 
@@ -182,12 +182,26 @@ Relevant to `--print` mode but not yet implemented as builder methods. All of th
 | `--verbose` | Explicit verbose mode (auto-added for stream-json) |
 | `--debug` | Enable debug mode with optional category filtering |
 | `--debug-file` | Write debug logs to a specific file path |
+| `--autocompact` | Auto-compact window size (`auto` or at least 100k tokens) |
+| `--forward-subagent-text` | Forward subagent text/thinking blocks with `parent_tool_use_id` (stream-json) |
+| `--permission-prompts` | Who answers permission prompts in `--print` mode (`host` or `none`) |
+| `--prompt-suggestions` | Emit `prompt_suggestion` messages after each turn |
+| `--restricted` | Remove code-running tools and ignore user/project/local settings |
+| `--safe-mode` | Start with all customizations disabled |
+| `--system-prompt-snapshot` | Record and reuse the system prompt per conversation (`on` / `off`) |
+| `--plugin-url` | Fetch a plugin .zip from a URL for this session |
 
 ### Interactive-Only (Not Applicable)
 
 These options are for interactive CLI sessions and do not apply to `--print` mode:
 
-`--chrome`, `--no-chrome`, `--ide`, `--tmux`, `--worktree`, `--from-pr`, `--remote-control-session-name-prefix`, `--replay-user-messages`, `--plugin-dir`
+`--chrome`, `--no-chrome`, `--ide`, `--tmux`, `--worktree`, `--from-pr`, `--remote-control-session-name-prefix`, `--replay-user-messages`, `--plugin-dir`, `--ax-screen-reader`, `--bg` / `--background`, `--cloud`, `--desktop`, `--environment`, `--remote-control`, `--teleport`
+
+### Changed Values
+
+- `--effort` now accepts `xhigh` in addition to `low`, `medium`, `high`, `max` (`effort::XHIGH`).
+- `--permission-mode` lists `manual` instead of `default` (`permission_mode::MANUAL`). `permission_mode::DEFAULT` is kept for older CLI versions.
+- `--mcp-debug` was removed from `--help` (it was already deprecated in favor of `--debug`).
 
 ### Managed Internally
 
